@@ -6,24 +6,31 @@
 
 ## 功能
 
-- 输入常见形式的 YouTube、YouTube Shorts 或 `youtu.be` 链接。
+- 通过 Google OAuth 在系统浏览器中绑定 YouTube 账号，仅申请只读权限。
+- 启动后读取全部订阅频道，自动发现最近24小时发布的新视频。
+- 应用运行期间每15分钟刷新一次；也可随时手动刷新。
+- 新视频按发布时间排队分析，已保存或本次已尝试的视频自动去重。
+- 无需绑定账号也可以随时粘贴单个 YouTube、Shorts 或 `youtu.be` 链接手动分析。
 - 启动时检查运行环境；依赖缺失或损坏时自动尝试修复，并在无法自动处理时给出明确提示。
 - 优先下载视频已有的人工或自动字幕。
 - 没有字幕时，自动下载音频并使用 Apple Silicon 优化的 MLX Whisper 本地转写。
 - 调用本机已登录的 Codex CLI 生成结构化分析。
-- 最终结果固定为“总览 + 5条编号要点”，全文不超过500字。
+- 可在设置中选择 Codex Sol、Terra、Luna 或自定义模型，并设置低、中、高、
+  超高、Max 或 Ultra 推理强度；每个自动分析任务都会使用当前选项。
+- 最终结果以“短总览卡片 + 5条编号要点卡片”展示，使用通俗短句、标签和箭头流程，通常为250–350字且不超过400字。
 - 根据 macOS 系统语言自动显示简体中文、繁体中文、英语、日语、韩语、西班牙语、法语或德语；分析结果使用同一语言。
 - 自动保存视频链接、标题、分析时间、转写稿和最终分析。
 - 支持查看历史、复制分析、打开原视频和删除记录。
 - 在侧边栏显示应用版本和构建号；源码或资源更新后重新构建时，构建号自动更新。
+- 启动时默认将主窗口最大化到当前屏幕的可用区域，不会自动进入全屏空间。
 
 ## 工作流程
 
 ```mermaid
 flowchart LR
     A[启动客户端] --> B[检查并修复运行环境]
-    B --> C[YouTube 链接]
-    C --> D[读取视频信息]
+    B --> C[绑定 YouTube 账号]
+    C --> D[读取订阅频道与最近24小时新视频]
     D --> E{存在字幕?}
     E -- 是 --> F[解析字幕]
     E -- 否 --> G[下载音频]
@@ -46,6 +53,8 @@ flowchart LR
 - Swift 5.10 或更高版本（仅构建时需要）
 - `uv`：负责隔离运行最新版 `yt-dlp`、`mlx-whisper` 和静态 ffmpeg 回退
 - 已安装并登录的 Codex CLI
+- 已启用 YouTube Data API v3 的 Google Cloud 项目
+- “桌面应用”类型的 Google OAuth 客户端凭据 JSON
 
 应用会在启动时验证这些依赖。若 Homebrew 可用，会自动安装或修复缺失的
 `uv`、Node.js/npm 和 Codex CLI；Codex 账号登录仍需用户授权：
@@ -57,10 +66,19 @@ codex login
 
 ## 快速开始
 
-1. 下载或构建 `YouTubeInsight.app`。
-2. 打开客户端并粘贴公开的 YouTube 视频链接。
-3. 点击“开始分析”，等待字幕读取或本地转写完成。
-4. 在右侧查看不超过500字的分析，在左侧重新打开历史记录。
+1. 在 [Google Cloud Console](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
+   启用 YouTube Data API v3。
+2. 在“API 和服务 → 凭据”中创建“桌面应用”OAuth 客户端，下载 JSON 文件。
+3. 打开客户端设置，导入该 JSON，点击“绑定账号”并在系统浏览器中授权。
+4. 客户端立即补抓最近24小时的订阅新视频，并逐条分析和保存。
+5. 后续保持应用运行即可每15分钟自动刷新，也可点击“立即刷新”。
+
+如果只需要分析单个视频，可以跳过账号绑定，直接在主界面的“手动分析”
+输入框粘贴 YouTube 链接并点击“分析”。手动与定时任务共用当前 Codex 模型、
+推理强度、字幕/Whisper 转写流程和历史记录。
+
+OAuth 使用 PKCE 和本机回环地址接收授权结果。访问令牌与刷新令牌保存在
+macOS 钥匙串中；解除绑定时会撤销并删除令牌。
 
 ## 构建客户端
 
@@ -74,7 +92,7 @@ open dist/YouTubeInsight.app
 
 正式版本由 `Resources/Info.plist` 中的 `CFBundleShortVersionString` 管理。
 构建号根据源码和资源的最近更新时间自动生成，例如
-`1.3.0（构建 20260727103000）`。相同内容重复构建时保持不变，也可以通过
+`1.5.3（构建 20260727103000）`。相同内容重复构建时保持不变，也可以通过
 `YOUTUBEINSIGHT_BUILD_NUMBER` 环境变量覆盖。
 
 可选的真实视频端到端检查：
@@ -90,7 +108,12 @@ chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh --environment-only
 ```
 
-## 首次分析说明
+## 自动分析说明
+
+客户端每次扫描都会分页读取全部订阅频道，再读取各频道的上传列表。扫描使用
+低配额的 `subscriptions.list`、`channels.list` 和 `playlistItems.list`，
+避免高成本搜索接口。应用关闭时不会继续运行；再次启动会重新检查最近24小时，
+因此不会依赖后台常驻。
 
 有字幕的视频通常很快。无字幕的视频会在首次使用时下载
 `whisper-large-v3-turbo` 模型，模型较大；下载完成后会保存在 Hugging Face
@@ -118,6 +141,9 @@ Whisper 使用纯文本文件交付转写结果，避免模型输出中的非标
 
 - 音频转写在本机完成。
 - 历史记录只保存在本机。
+- YouTube OAuth 令牌保存在 macOS 钥匙串中，应用仅申请
+  `youtube.readonly` 权限。
+- 订阅频道和上传列表通过 YouTube Data API 获取。
 - 最终转写稿会交给本机登录的 Codex CLI 生成分析；具体数据处理方式取决于
   Codex 账号和服务配置。
 - 临时下载的音频会在任务结束后删除；Whisper 模型和工具缓存会保留以供复用。
@@ -144,6 +170,15 @@ npm，不会因为 GUI 环境找不到 Node 而重装 npm。
 ```bash
 codex login
 ```
+
+不同 Codex 账号可用的模型和推理强度可能不同。如果所选组合不受支持，请在
+设置中切换为 `Sol + 中`，或使用账号实际可用的自定义模型 ID。
+
+### YouTube 账号无法绑定
+
+确认 OAuth 客户端类型为“桌面应用”，对应 Google Cloud 项目已启用
+YouTube Data API v3，并且当前 Google 账号已加入 OAuth 测试用户。公共分发
+前还需要按 Google 要求完成 OAuth 应用验证。
 
 ### 首次处理无字幕视频很慢
 

@@ -6,6 +6,8 @@ YouTubeInsight is a local desktop client, but its complete workflow is not
 offline:
 
 - YouTube metadata, captions, and audio are retrieved from YouTube.
+- Subscription and upload metadata is retrieved through YouTube Data API v3
+  using the read-only `youtube.readonly` OAuth scope.
 - `uvx` may download `yt-dlp`, `mlx-whisper`, Python packages, and model files.
 - Transcription runs locally on the Mac.
 - The transcript is sent to the locally authenticated Codex CLI for analysis.
@@ -23,6 +25,12 @@ History:
 ```text
 ~/Library/Application Support/YouTubeInsight/history.json
 ```
+
+YouTube access and refresh tokens are stored as a generic password item in the
+current user's macOS Keychain. The OAuth client ID and optional desktop client
+secret are stored in app preferences. Installed desktop clients cannot treat a
+client secret as confidential. Disconnecting the account asks Google to revoke
+the refresh token and removes the local Keychain item.
 
 Deleting a history item removes that record from the history file. Temporary
 audio is removed after a completed or failed task. Package and Whisper model

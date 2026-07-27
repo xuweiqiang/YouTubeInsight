@@ -1,4 +1,6 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
@@ -38,16 +40,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .focusURLField)) { _ in
             isURLFieldFocused = true
-        }
-        .onAppear {
-            if model.records.isEmpty && model.environmentState == .ready {
-                isURLFieldFocused = true
-            }
-        }
-        .onChange(of: model.environmentState) { state in
-            if state == .ready && model.records.isEmpty {
-                isURLFieldFocused = true
-            }
         }
         .task {
             model.prepareEnvironmentIfNeeded()
@@ -124,7 +116,9 @@ struct ContentView: View {
 
     private var detail: some View {
         VStack(spacing: 0) {
-            inputBar
+            subscriptionBar
+            Divider()
+            manualInputBar
             Divider()
 
             if let record = model.selectedRecord {
@@ -140,51 +134,75 @@ struct ContentView: View {
         }
     }
 
-    private var inputBar: some View {
+    private var subscriptionBar: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 10) {
-                Image(systemName: "link")
-                    .foregroundStyle(.secondary)
-                TextField(
-                    L10n.string(
-                        "input.placeholder",
-                        fallback: "Paste a YouTube URL, for example https://www.youtube.com/watch?v=…"
-                    ),
-                    text: $model.urlInput
-                )
-                .textFieldStyle(.plain)
-                .focused($isURLFieldFocused)
-                .onSubmit {
-                    model.analyze()
+                Image(systemName: youtubeAccountIcon)
+                    .font(.title3)
+                    .foregroundStyle(youtubeAccountColor)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(youtubeAccountTitle)
+                        .font(.headline)
+                    Text(youtubeAccountDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
-                Button {
-                    model.analyze()
-                } label: {
-                    if model.isAnalyzing {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 18, height: 18)
-                    } else {
+                Spacer()
+
+                switch model.youtubeConnectionState {
+                case .connected:
+                    Button(action: model.refreshSubscriptions) {
                         Label(
-                            L10n.string("action.analyze", fallback: "Analyze"),
-                            systemImage: "sparkles"
+                            L10n.string("youtube.refresh", fallback: "Refresh now"),
+                            systemImage: "arrow.clockwise"
                         )
                     }
+                    .disabled(
+                        model.isRefreshingSubscriptions
+                            || model.isAnalyzing
+                    )
+                case .connecting:
+                    ProgressView()
+                        .controlSize(.small)
+                case .disconnected:
+                    Button(action: model.bindYouTubeAccount) {
+                        Label(
+                            L10n.string("youtube.bind", fallback: "Bind account"),
+                            systemImage: "person.crop.circle.badge.plus"
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                case .notConfigured:
+                    settingsControl
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(model.isAnalyzing || model.urlInput.nilIfBlank == nil)
             }
 
-            if model.isAnalyzing || !model.statusMessage.isEmpty {
+            if model.isRefreshingSubscriptions
+                || model.isAnalyzing
+                || !model.statusMessage.isEmpty {
                 HStack(spacing: 7) {
-                    if model.isAnalyzing {
+                    if model.isRefreshingSubscriptions || model.isAnalyzing {
                         ProgressView()
                             .controlSize(.mini)
                     }
                     Text(model.statusMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if model.pendingAutomaticAnalyses > 0 {
+                        Text("·")
+                            .foregroundStyle(.tertiary)
+                        Text(L10n.format(
+                            "youtube.pending",
+                            fallback: "%d queued",
+                            model.pendingAutomaticAnalyses
+                        ))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -192,26 +210,186 @@ struct ContentView: View {
         .background(.bar)
     }
 
+    private var manualInputBar: some View {
+        HStack(spacing: 10) {
+            Label(
+                L10n.string("manual.title", fallback: "Manual analysis"),
+                systemImage: "link"
+            )
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+
+            TextField(
+                L10n.string(
+                    "input.placeholder",
+                    fallback: "Paste a YouTube URL, for example https://www.youtube.com/watch?v=…"
+                ),
+                text: $model.urlInput
+            )
+                .textFieldStyle(.roundedBorder)
+                .focused($isURLFieldFocused)
+                .onSubmit {
+                    model.analyzeManualURL()
+                }
+
+            Button(action: model.analyzeManualURL) {
+                if model.isAnalyzing {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(width: 18, height: 18)
+                } else {
+                    Label(
+                        L10n.string("action.analyze", fallback: "Analyze"),
+                        systemImage: "sparkles"
+                    )
+                }
+            }
+                .buttonStyle(.borderedProminent)
+                .disabled(
+                    model.urlInput.nilIfBlank == nil
+                        || model.isAnalyzing
+                        || model.isRefreshingSubscriptions
+                )
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .background(.bar)
+    }
+
     private var welcome: some View {
         VStack(spacing: 14) {
-            Image(systemName: "play.rectangle.on.rectangle")
+            Image(systemName: "dot.radiowaves.left.and.right")
                 .font(.system(size: 48))
                 .foregroundStyle(.secondary)
             Text(L10n.string("welcome.title", fallback: "YouTube Video Analysis"))
                 .font(.title2.weight(.semibold))
             Text(L10n.string(
                 "welcome.description",
-                fallback: "Enter a video URL. The app uses available captions first, then downloads audio and transcribes it locally with Whisper when needed."
+                fallback: "Bind YouTube for automatic subscription analysis, or paste any YouTube link above for a one-time manual analysis."
             ))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
-            Button(L10n.string("action.enterURL", fallback: "Enter URL")) {
-                isURLFieldFocused = true
+
+            switch model.youtubeConnectionState {
+            case .connected:
+                Button(
+                    L10n.string("youtube.refresh", fallback: "Refresh now"),
+                    action: model.refreshSubscriptions
+                )
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.isRefreshingSubscriptions)
+            case .disconnected:
+                Button(
+                    L10n.string("youtube.bind", fallback: "Bind account"),
+                    action: model.bindYouTubeAccount
+                )
+                    .buttonStyle(.borderedProminent)
+            case .notConfigured:
+                settingsControl
+                    .buttonStyle(.borderedProminent)
+            case .connecting:
+                ProgressView()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+
+    private var youtubeAccountTitle: String {
+        switch model.youtubeConnectionState {
+        case let .connected(name):
+            return name
+        case .connecting:
+            return L10n.string(
+                "youtube.connecting",
+                fallback: "Connecting YouTube account…"
+            )
+        case .disconnected:
+            return L10n.string(
+                "youtube.notConnected",
+                fallback: "YouTube account not connected"
+            )
+        case .notConfigured:
+            return L10n.string(
+                "youtube.notConfigured",
+                fallback: "YouTube account setup required"
+            )
+        }
+    }
+
+    private var youtubeAccountDescription: String {
+        if let lastRefresh = model.lastSubscriptionRefresh {
+            return L10n.format(
+                "youtube.lastRefresh",
+                fallback: "Last checked: %@",
+                DateFormatter.localizedString(
+                    from: lastRefresh,
+                    dateStyle: .short,
+                    timeStyle: .short
+                )
+            )
+        }
+        return L10n.string(
+            "youtube.monitorDescription",
+            fallback: "Checks the last 24 hours now and every 15 minutes while the app is running"
+        )
+    }
+
+    private var youtubeAccountIcon: String {
+        switch model.youtubeConnectionState {
+        case .connected:
+            return "checkmark.circle.fill"
+        case .connecting:
+            return "person.crop.circle.badge.clock"
+        case .disconnected, .notConfigured:
+            return "person.crop.circle.badge.exclamationmark"
+        }
+    }
+
+    private var youtubeAccountColor: Color {
+        switch model.youtubeConnectionState {
+        case .connected:
+            return .green
+        case .connecting:
+            return .accentColor
+        case .disconnected, .notConfigured:
+            return .orange
+        }
+    }
+
+    @ViewBuilder
+    private var settingsControl: some View {
+        if #available(macOS 14.0, *) {
+            SettingsLink {
+                Label(
+                    L10n.string("youtube.configure", fallback: "Set up"),
+                    systemImage: "gearshape"
+                )
+            }
+        } else {
+            Button(action: openLegacySettings) {
+                Label(
+                    L10n.string("youtube.configure", fallback: "Set up"),
+                    systemImage: "gearshape"
+                )
+            }
+        }
+    }
+
+    private func openLegacySettings() {
+        let opened = NSApp.sendAction(
+            Selector(("showSettingsWindow:")),
+            to: nil,
+            from: nil
+        )
+        if !opened {
+            NSApp.sendAction(
+                Selector(("showPreferencesWindow:")),
+                to: nil,
+                from: nil
+            )
+        }
     }
 }
 
@@ -296,6 +474,10 @@ private struct AnalysisDetail: View {
     let deleteAction: () -> Void
     @State private var showsTranscript = false
 
+    private var presentation: AnalysisPresentation {
+        AnalysisPresentation.parse(record.analysis)
+    }
+
     private var renderedAnalysis: AttributedString {
         (try? AttributedString(
             markdown: record.analysis,
@@ -354,11 +536,37 @@ private struct AnalysisDetail: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
-                    Text(renderedAnalysis)
-                        .textSelection(.enabled)
-                        .font(.body)
-                        .lineSpacing(4)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !presentation.overview.isEmpty || !presentation.points.isEmpty {
+                        if !presentation.overview.isEmpty {
+                            AnalysisOverviewCard(text: presentation.overview)
+                        }
+
+                        if !presentation.points.isEmpty {
+                            Text(L10n.string(
+                                "analysis.heading.points",
+                                fallback: "Key points"
+                            ))
+                                .font(.title3.weight(.semibold))
+
+                            VStack(spacing: 10) {
+                                ForEach(
+                                    Array(presentation.points.enumerated()),
+                                    id: \.offset
+                                ) { index, point in
+                                    AnalysisPointRow(
+                                        number: index + 1,
+                                        point: point
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        Text(renderedAnalysis)
+                            .textSelection(.enabled)
+                            .font(.body)
+                            .lineSpacing(4)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
 
                     if showsTranscript {
                         Divider()
@@ -379,21 +587,191 @@ private struct AnalysisDetail: View {
     }
 }
 
+private struct AnalysisOverviewCard: View {
+    let text: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                L10n.string("analysis.heading.overview", fallback: "Overview"),
+                systemImage: "lightbulb.fill"
+            )
+                .font(.headline)
+                .foregroundStyle(.tint)
+
+            Text(text)
+                .font(.title3.weight(.medium))
+                .lineSpacing(3)
+                .textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(Color.accentColor.opacity(0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+private struct AnalysisPointRow: View {
+    let number: Int
+    let point: AnalysisPoint
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Text("\(number)")
+                .font(.headline)
+                .foregroundStyle(.white)
+                .frame(width: 30, height: 30)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                if let title = point.title {
+                    Text(title)
+                        .font(.headline)
+                }
+                Text(point.detail)
+                    .font(.body)
+                    .foregroundStyle(point.title == nil ? .primary : .secondary)
+                    .lineSpacing(2)
+            }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(14)
+        .background(Color.primary.opacity(0.045))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 struct SettingsView: View {
+    @ObservedObject var model: AppModel
     @AppStorage("codexModel") private var codexModel = "gpt-5.6-sol"
+    @AppStorage("codexCustomModel") private var codexCustomModel = ""
+    @AppStorage("codexReasoningEffort")
+    private var codexReasoningEffort = CodexReasoningEffort.medium.rawValue
     @AppStorage("whisperModel") private var whisperModel =
         "mlx-community/whisper-large-v3-turbo"
+    @AppStorage(YouTubeOAuthConfiguration.clientIDKey)
+    private var youtubeClientID = ""
+    @AppStorage(YouTubeOAuthConfiguration.clientSecretKey)
+    private var youtubeClientSecret = ""
+    @State private var credentialMessage: String?
+    @State private var credentialMessageIsError = false
 
     var body: some View {
         Form {
-            Section(L10n.string("settings.analysisSection", fallback: "Analysis model")) {
+            Section(L10n.string(
+                "youtube.oauthSection",
+                fallback: "YouTube account"
+            )) {
                 TextField(
-                    L10n.string("settings.codexModel", fallback: "Codex model"),
-                    text: $codexModel
+                    L10n.string("youtube.clientID", fallback: "OAuth client ID"),
+                    text: $youtubeClientID
                 )
+                SecureField(
+                    L10n.string(
+                        "youtube.clientSecret",
+                        fallback: "OAuth client secret (optional)"
+                    ),
+                    text: $youtubeClientSecret
+                )
+
+                HStack {
+                    Button(
+                        L10n.string(
+                            "youtube.importJSON",
+                            fallback: "Import OAuth JSON…"
+                        ),
+                        action: importOAuthCredentials
+                    )
+
+                    Spacer()
+
+                    switch model.youtubeConnectionState {
+                    case let .connected(name):
+                        Label(name, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Button(
+                            L10n.string("youtube.disconnect", fallback: "Disconnect"),
+                            role: .destructive,
+                            action: model.disconnectYouTubeAccount
+                        )
+                    case .connecting:
+                        ProgressView()
+                            .controlSize(.small)
+                    case .disconnected, .notConfigured:
+                        Button(
+                            L10n.string("youtube.bind", fallback: "Bind account"),
+                            action: model.bindYouTubeAccount
+                        )
+                            .buttonStyle(.borderedProminent)
+                            .disabled(youtubeClientID.nilIfBlank == nil)
+                    }
+                }
+
+                if let credentialMessage {
+                    Text(credentialMessage)
+                        .font(.caption)
+                        .foregroundStyle(
+                            credentialMessageIsError ? Color.red : Color.green
+                        )
+                }
+
+                Text(L10n.string(
+                    "youtube.oauthDescription",
+                    fallback: "Create a Desktop app OAuth client in Google Cloud, enable YouTube Data API v3, then import the downloaded JSON. Tokens are kept in macOS Keychain and only read-only YouTube access is requested."
+                ))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Link(
+                    L10n.string(
+                        "youtube.openGoogleCloud",
+                        fallback: "Open Google Cloud credentials"
+                    ),
+                    destination: URL(
+                        string: "https://console.cloud.google.com/apis/credentials"
+                    )!
+                )
+            }
+
+            Section(L10n.string("settings.analysisSection", fallback: "Analysis model")) {
+                Picker(
+                    L10n.string("settings.codexModel", fallback: "Codex model"),
+                    selection: codexModelSelection
+                ) {
+                    ForEach(CodexModelOption.allCases) { option in
+                        Text(option.localizedName)
+                            .tag(option)
+                    }
+                }
+
+                if codexModelSelection.wrappedValue == .custom {
+                    TextField(
+                        L10n.string(
+                            "settings.codexCustomModelID",
+                            fallback: "Custom model ID"
+                        ),
+                        text: customCodexModelBinding
+                    )
+                }
+
+                Picker(
+                    L10n.string(
+                        "settings.codexReasoningEffort",
+                        fallback: "Reasoning effort"
+                    ),
+                    selection: $codexReasoningEffort
+                ) {
+                    ForEach(CodexReasoningEffort.allCases) { effort in
+                        Text(effort.localizedName)
+                            .tag(effort.rawValue)
+                    }
+                }
+
                 Text(L10n.string(
                     "settings.codexDescription",
-                    fallback: "Uses the Codex CLI already signed in on this Mac. Account credentials are not stored by the app."
+                    fallback: "Sol favors depth and polish, Terra balances speed and quality, and Luna suits repeatable summaries. Higher reasoning effort can improve difficult analyses but takes longer and may use more tokens. Availability depends on the signed-in Codex account."
                 ))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -424,6 +802,63 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 520, height: 300)
+        .frame(width: 640, height: 620)
+    }
+
+    private var codexModelSelection: Binding<CodexModelOption> {
+        Binding(
+            get: {
+                CodexModelOption.selection(for: codexModel)
+            },
+            set: { option in
+                codexModel = option.rawValue
+            }
+        )
+    }
+
+    private var customCodexModelBinding: Binding<String> {
+        Binding(
+            get: {
+                if codexModel != CodexModelOption.custom.rawValue,
+                   CodexModelOption(rawValue: codexModel) == nil {
+                    return codexModel
+                }
+                return codexCustomModel
+            },
+            set: { value in
+                codexCustomModel = value
+                codexModel = CodexModelOption.custom.rawValue
+            }
+        )
+    }
+
+    private func importOAuthCredentials() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = L10n.string(
+            "youtube.importPrompt",
+            fallback: "Choose the OAuth desktop credential JSON downloaded from Google Cloud."
+        )
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+        do {
+            let configuration = try YouTubeOAuthConfiguration.imported(
+                from: Data(contentsOf: url)
+            )
+            youtubeClientID = configuration.clientID
+            youtubeClientSecret = configuration.clientSecret
+            credentialMessageIsError = false
+            credentialMessage = L10n.string(
+                "youtube.importSuccess",
+                fallback: "OAuth credentials imported. You can now bind the account."
+            )
+        } catch {
+            credentialMessageIsError = true
+            credentialMessage = (error as? LocalizedError)?.errorDescription
+                ?? error.localizedDescription
+        }
     }
 }

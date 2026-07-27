@@ -63,7 +63,7 @@ enum PipelineError: LocalizedError {
 }
 
 final class AnalysisPipeline: @unchecked Sendable {
-    typealias ProgressHandler = (String) -> Void
+    typealias ProgressHandler = @Sendable (String) -> Void
 
     private let runner = ProcessRunner()
     private let fileManager = FileManager.default
@@ -188,6 +188,7 @@ final class AnalysisPipeline: @unchecked Sendable {
             transcript: transcript,
             codex: codex,
             model: settings.codexModel,
+            reasoningEffort: settings.codexReasoningEffort,
             workDirectory: workDirectory
         )
 
@@ -366,6 +367,7 @@ final class AnalysisPipeline: @unchecked Sendable {
         transcript: String,
         codex: String,
         model: String,
+        reasoningEffort: String,
         workDirectory: URL
     ) throws -> String {
         let summaryURL = workDirectory.appendingPathComponent("analysis.md")
@@ -385,20 +387,22 @@ final class AnalysisPipeline: @unchecked Sendable {
         Video title: \(title)
         Video URL: \(url.absoluteString)
 
-        Write the entire analysis in \(outputLanguage). Use clear, natural wording and this exact Markdown structure:
+        Write the entire analysis in \(outputLanguage). Explain it for a general audience with short, concrete wording. Use this exact Markdown structure:
 
         ## \(overviewHeading)
-        One short paragraph covering the topic, central conclusion, and overall value.
+        One plain-language sentence covering the topic and central conclusion (maximum 60 characters).
 
         ## \(pointsHeading)
-        1. First core point
-        2. Second core point
-        3. Third core point
-        4. Fourth core point
-        5. Fifth core point
+        1. **Short label** — one concrete takeaway
+        2. **Short label** — one concrete takeaway
+        3. **Short label** — one concrete takeaway
+        4. **Short label** — one concrete takeaway
+        5. **Short label** — one concrete takeaway
 
-        The entire output must not exceed 500 characters. Keep each numbered point to one or two short sentences.
-        Fold important facts, data, recommendations, and necessary verification warnings into the most relevant point. Add no other sections.
+        The entire output should be 250–350 characters and must not exceed 400 characters.
+        Each point must be one short sentence, preferably under 45 characters. Translate jargon into everyday language.
+        When explaining a sequence or causal relationship, use a compact arrow form such as A → B → C.
+        Fold essential facts, data, recommendations, and verification warnings into the most relevant point. Add no other sections or paragraphs.
 
         Do not invent information absent from the transcript. Silently correct obvious speech-recognition mistakes, but flag uncertain proper nouns.
         Omit intros, outros, requests to like or subscribe, and other irrelevant material.
@@ -415,7 +419,8 @@ final class AnalysisPipeline: @unchecked Sendable {
                 "--output-last-message", summaryURL.path,
                 "--skip-git-repo-check",
                 "-m", model,
-                "-c", "text.verbosity=\"medium\""
+                "-c", "model_reasoning_effort=\"\(reasoningEffort)\"",
+                "-c", "text.verbosity=\"low\""
             ],
             input: prompt,
             currentDirectory: workDirectory
@@ -432,7 +437,7 @@ final class AnalysisPipeline: @unchecked Sendable {
         else {
             throw PipelineError.emptyAnalysis
         }
-        return AnalysisFormatter.capped(cleaned)
+        return AnalysisFormatter.capped(cleaned, maxCharacters: 400)
     }
 
     private func runYTDLP(

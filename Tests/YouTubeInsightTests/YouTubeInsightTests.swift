@@ -104,9 +104,109 @@ final class YouTubeInsightTests: XCTestCase {
         XCTAssertTrue(result.succeeded, result.standardError)
     }
 
-    func testAnalysisFormatterEnforcesFiveHundredCharacterLimit() {
-        let result = AnalysisFormatter.capped(String(repeating: "字", count: 700))
-        XCTAssertEqual(result.count, 500)
+    func testAnalysisFormatterEnforcesFourHundredCharacterLimit() {
+        let result = AnalysisFormatter.capped(
+            String(repeating: "字", count: 700),
+            maxCharacters: 400
+        )
+        XCTAssertEqual(result.count, 400)
         XCTAssertTrue(result.hasSuffix("…"))
+    }
+
+    func testAnalysisPresentationParsesOverviewAndLabeledPoints() {
+        let presentation = AnalysisPresentation.parse(
+            """
+            ## Overview
+            A short, clear conclusion.
+
+            ## Key points
+            1. **Problem** — The old result was too long.
+            2. **Solution** — Summary → labels → visual cards.
+            """
+        )
+
+        XCTAssertEqual(presentation.overview, "A short, clear conclusion.")
+        XCTAssertEqual(
+            presentation.points,
+            [
+                AnalysisPoint(title: "Problem", detail: "The old result was too long."),
+                AnalysisPoint(title: "Solution", detail: "Summary → labels → visual cards.")
+            ]
+        )
+    }
+
+    func testImportsGoogleDesktopOAuthCredentialFile() throws {
+        let data = """
+        {
+          "installed": {
+            "client_id": "desktop-client.apps.googleusercontent.com",
+            "client_secret": "test-secret"
+          }
+        }
+        """.data(using: .utf8)!
+
+        XCTAssertEqual(
+            try YouTubeOAuthConfiguration.imported(from: data),
+            YouTubeOAuthConfiguration(
+                clientID: "desktop-client.apps.googleusercontent.com",
+                clientSecret: "test-secret"
+            )
+        )
+    }
+
+    func testResolvesCodexModelAndReasoningSettings() {
+        XCTAssertEqual(
+            PipelineSettings.resolvedCodexModel(
+                selected: CodexModelOption.custom.rawValue,
+                custom: "custom-model"
+            ),
+            "custom-model"
+        )
+        XCTAssertEqual(
+            PipelineSettings.resolvedCodexModel(
+                selected: CodexModelOption.custom.rawValue,
+                custom: nil
+            ),
+            CodexModelOption.sol.modelID
+        )
+        XCTAssertEqual(
+            PipelineSettings.resolvedReasoningEffort("ultra"),
+            "ultra"
+        )
+        XCTAssertEqual(
+            PipelineSettings.resolvedReasoningEffort("unsupported"),
+            "medium"
+        )
+    }
+
+    func testParsesYouTubeUploadPlaylistItems() throws {
+        let data = """
+        {
+          "items": [{
+            "snippet": {
+              "title": "New video",
+              "channelTitle": "Example channel",
+              "publishedAt": "2026-07-27T01:00:00Z"
+            },
+            "contentDetails": {
+              "videoId": "XYgm-dNNrR8",
+              "videoPublishedAt": "2026-07-27T01:00:00Z"
+            }
+          }]
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(
+            PlaylistItemListResponse.self,
+            from: data
+        )
+
+        let videos = YouTubeAPIParser.videos(
+            from: response,
+            fallbackChannelTitle: "Fallback"
+        )
+
+        XCTAssertEqual(videos.count, 1)
+        XCTAssertEqual(videos[0].videoID, "XYgm-dNNrR8")
+        XCTAssertEqual(videos[0].channelTitle, "Example channel")
     }
 }
