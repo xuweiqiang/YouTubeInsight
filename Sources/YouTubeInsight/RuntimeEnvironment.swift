@@ -20,7 +20,7 @@ enum RuntimeEnvironmentError: LocalizedError {
 }
 
 final class RuntimeEnvironment: @unchecked Sendable {
-    typealias ProgressHandler = (String) -> Void
+    typealias ProgressHandler = @Sendable (String) -> Void
 
     private let runner: ProcessRunner
     private let fileManager: FileManager

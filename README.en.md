@@ -1,22 +1,32 @@
 # YouTubeInsight
 
-A native macOS client that turns a YouTube URL into a concise, structured
-analysis and keeps a local, searchable history.
+A native macOS client that monitors your YouTube subscriptions, analyzes every
+new video from the last 24 hours, and keeps a local, searchable history.
 
 [简体中文](README.md) · English
 
 ## Features
 
-- Accepts standard YouTube, YouTube Shorts, live, and `youtu.be` URLs.
+- Binds a YouTube account in the system browser with read-only Google OAuth.
+- Reads every subscribed channel and discovers videos published in the last 24 hours.
+- Refreshes every 15 minutes while the app is running, with an on-demand refresh button.
+- Queues new videos in publication order and deduplicates saved or already-attempted videos.
+- Still accepts individual YouTube, Shorts, and `youtu.be` links for manual
+  analysis without requiring account binding.
 - Checks the runtime at launch, automatically repairs missing or broken tools
   when possible, and shows actionable errors when user authorization is required.
 - Uses human or automatic YouTube captions when available.
 - Downloads audio and transcribes it locally with MLX Whisper when captions are unavailable.
-- Uses the signed-in Codex CLI to produce an overview and five numbered points.
-- Enforces a 500-character maximum for every analysis.
+- Uses the signed-in Codex CLI to produce one short overview card and five numbered point cards.
+- Lets you choose Codex Sol, Terra, Luna, or a custom model, plus Low, Medium,
+  High, Extra High, Max, or Ultra reasoning effort. Every automatic analysis
+  uses the current selection.
+- Uses plain language, short labels, and arrow flows; results are normally 250–350 characters and never exceed 400.
 - Saves the URL, title, date, transcript source, transcript, and analysis locally.
 - Shows the app version and build number in the sidebar. Rebuilding after a
   source or resource update automatically generates a new build number.
+- Opens the main window maximized to the current screen's usable area without
+  entering a separate full-screen Space.
 - Supports Simplified Chinese, Traditional Chinese, English, Japanese, Korean,
   Spanish, French, and German. Both the interface and new analyses follow the
   macOS language.
@@ -26,8 +36,8 @@ analysis and keeps a local, searchable history.
 ```mermaid
 flowchart LR
     A[Launch app] --> B[Check and repair runtime]
-    B --> C[YouTube URL]
-    C --> D[Read metadata]
+    B --> C[Bind YouTube account]
+    C --> D[Read subscriptions and last 24 hours]
     D --> E{Captions available?}
     E -- Yes --> F[Parse captions]
     E -- No --> G[Download audio]
@@ -54,6 +64,8 @@ on disk so later runs do not download them again.
 - [`uv`](https://docs.astral.sh/uv/) for isolated `yt-dlp`, `mlx-whisper`, and
   static ffmpeg fallback execution
 - Codex CLI installed and signed in
+- A Google Cloud project with YouTube Data API v3 enabled
+- A Google OAuth **Desktop app** credential JSON file
 
 The launch check validates these tools. When Homebrew is available, the app can
 install or repair `uv`, Node.js/npm, and Codex CLI automatically. Codex account
@@ -63,6 +75,25 @@ sign-in still requires user authorization:
 brew install uv
 codex login
 ```
+
+## Connect YouTube
+
+1. Enable [YouTube Data API v3](https://console.cloud.google.com/apis/library/youtube.googleapis.com)
+   in Google Cloud.
+2. Create an OAuth client with application type **Desktop app** under
+   **APIs & Services → Credentials**, then download its JSON file.
+3. Open YouTubeInsight Settings, import the JSON, and choose **Bind account**.
+4. Complete read-only authorization in the system browser.
+
+The app uses PKCE with a loopback redirect. Access and refresh tokens are stored
+in macOS Keychain and are revoked and deleted when the account is disconnected.
+It immediately checks the previous 24 hours, then refreshes every 15 minutes
+while running.
+
+For a one-off video, skip account binding and paste the URL into the
+**Manual analysis** field in the main window. Manual and scheduled jobs share
+the selected Codex model, reasoning effort, caption/Whisper pipeline, and local
+history.
 
 ## Build and run
 
@@ -75,7 +106,7 @@ open dist/YouTubeInsight.app
 
 `CFBundleShortVersionString` in `Resources/Info.plist` controls the release
 version. The build script derives `CFBundleVersion` from the latest source or
-resource modification time, for example `1.3.0 (Build 20260727103000)`.
+resource modification time, for example `1.5.3 (Build 20260727103000)`.
 Unchanged content keeps the same build number. Set
 `YOUTUBEINSIGHT_BUILD_NUMBER` to override it.
 
@@ -95,6 +126,11 @@ Check only the startup environment:
 The first captionless video downloads the selected Whisper model. Subsequent
 runs reuse the model cache.
 
+Each scan pages through all subscriptions and reads channel upload playlists
+with the low-cost `subscriptions.list`, `channels.list`, and
+`playlistItems.list` endpoints. The app does not run after it is closed; the
+next launch checks the previous 24 hours again.
+
 Whisper output is read as plain text so non-standard numeric values in model
 JSON metadata cannot invalidate an otherwise successful transcript.
 
@@ -111,6 +147,9 @@ result in the newly selected language.
 
 - Speech transcription runs locally.
 - Analysis history remains on the Mac.
+- YouTube OAuth tokens remain in macOS Keychain, and only the
+  `youtube.readonly` scope is requested.
+- Subscription and upload metadata is retrieved through YouTube Data API v3.
 - The transcript is sent to the locally authenticated Codex CLI for analysis.
 - YouTube, package, model, and Codex access require network connectivity.
 
@@ -124,7 +163,12 @@ See [SECURITY.md](SECURITY.md) for the trust model and reporting instructions.
   Terminal. The app now adds Homebrew and user tool directories automatically,
   and checks npm only when Codex CLI actually needs to be installed.
 - **Codex analysis fails:** run `codex login` and confirm the configured model is
-  available to the account.
+  available to the account. Model and reasoning availability can vary by
+  account; switch to **Sol + Medium** or enter a supported custom model ID.
+- **YouTube binding fails:** confirm the OAuth client type is **Desktop app**,
+  YouTube Data API v3 is enabled, and the Google account is listed as a test
+  user while the OAuth consent screen is in testing. Public distribution may
+  require Google OAuth verification.
 - **First transcription is slow:** wait for the selected Whisper model to finish
   downloading.
 - **macOS cannot verify the developer:** locally built packages are ad-hoc signed

@@ -12,7 +12,9 @@ swiftc \
     -o "build/YouTubeInsight" \
     Sources/YouTubeInsight/*.swift \
     -framework SwiftUI \
-    -framework AppKit
+    -framework AppKit \
+    -framework Network \
+    -framework Security
 
 if [[ -d "dist/YouTubeInsight.app" ]]; then
     rm -rf "dist/YouTubeInsight.app"

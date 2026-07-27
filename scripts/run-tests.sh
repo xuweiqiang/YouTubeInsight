@@ -28,13 +28,19 @@ swiftc \
     Sources/YouTubeInsight/Models.swift \
     Sources/YouTubeInsight/Localization.swift \
     Sources/YouTubeInsight/AnalysisFormatter.swift \
+    Sources/YouTubeInsight/AnalysisPresentation.swift \
     Sources/YouTubeInsight/HistoryStore.swift \
     Sources/YouTubeInsight/YouTubeURLParser.swift \
     Sources/YouTubeInsight/SubtitleParser.swift \
     Sources/YouTubeInsight/ProcessRunner.swift \
     Sources/YouTubeInsight/RuntimeEnvironment.swift \
     Sources/YouTubeInsight/WhisperTranscript.swift \
+    Sources/YouTubeInsight/YouTubeOAuth.swift \
+    Sources/YouTubeInsight/YouTubeAPI.swift \
     Sources/YouTubeInsight/AnalysisPipeline.swift \
-    Tests/SelfTest.swift
+    Tests/SelfTest.swift \
+    -framework AppKit \
+    -framework Network \
+    -framework Security
 
 "build/YouTubeInsightSelfTest"

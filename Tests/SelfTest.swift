@@ -8,6 +8,10 @@ struct SelfTest {
         try testPlainTextWhisperTranscript()
         try testGUIProcessPathNormalization()
         try testAnalysisLengthLimit()
+        try testAnalysisPresentation()
+        try testCodexModelSettings()
+        try testYouTubeOAuthCredentialImport()
+        try testYouTubePlaylistParsing()
         try testHistoryRoundTrip()
         print("All YouTubeInsight self-tests passed.")
     }
@@ -106,9 +110,114 @@ struct SelfTest {
     }
 
     private static func testAnalysisLengthLimit() throws {
-        let result = AnalysisFormatter.capped(String(repeating: "字", count: 700))
-        try expect(result.count == 500, "analysis should be capped at 500 characters")
+        let result = AnalysisFormatter.capped(
+            String(repeating: "字", count: 700),
+            maxCharacters: 400
+        )
+        try expect(result.count == 400, "analysis should be capped at 400 characters")
         try expect(result.hasSuffix("…"), "truncated analysis should end with an ellipsis")
+    }
+
+    private static func testAnalysisPresentation() throws {
+        let presentation = AnalysisPresentation.parse(
+            """
+            ## 总览
+            这是一个通俗易懂的结论。
+
+            ## 重点
+            1. **背景** — 先理解问题
+            2. **过程** — 输入 → 分析 → 结论
+            """
+        )
+        try expect(
+            presentation.overview == "这是一个通俗易懂的结论。",
+            "analysis overview should be parsed"
+        )
+        try expect(presentation.points.count == 2, "analysis points should be parsed")
+        try expect(
+            presentation.points[0] == AnalysisPoint(title: "背景", detail: "先理解问题"),
+            "analysis point labels should be parsed"
+        )
+    }
+
+    private static func testCodexModelSettings() throws {
+        try expect(
+            PipelineSettings.resolvedCodexModel(
+                selected: CodexModelOption.custom.rawValue,
+                custom: "custom-model"
+            ) == "custom-model",
+            "custom Codex model should be resolved"
+        )
+        try expect(
+            PipelineSettings.resolvedCodexModel(
+                selected: CodexModelOption.custom.rawValue,
+                custom: ""
+            ) == CodexModelOption.sol.modelID,
+            "blank custom model should fall back to Sol"
+        )
+        try expect(
+            PipelineSettings.resolvedReasoningEffort("xhigh") == "xhigh",
+            "supported reasoning effort should be preserved"
+        )
+        try expect(
+            PipelineSettings.resolvedReasoningEffort("unsupported") == "medium",
+            "unsupported reasoning effort should fall back to medium"
+        )
+    }
+
+    private static func testYouTubeOAuthCredentialImport() throws {
+        let data = """
+        {
+          "installed": {
+            "client_id": "desktop-client.apps.googleusercontent.com",
+            "client_secret": "test-secret"
+          }
+        }
+        """.data(using: .utf8)!
+        let configuration = try YouTubeOAuthConfiguration.imported(from: data)
+        try expect(
+            configuration.clientID == "desktop-client.apps.googleusercontent.com",
+            "OAuth client ID should be imported"
+        )
+        try expect(
+            configuration.clientSecret == "test-secret",
+            "OAuth client secret should be imported"
+        )
+    }
+
+    private static func testYouTubePlaylistParsing() throws {
+        let data = """
+        {
+          "items": [{
+            "snippet": {
+              "title": "New video",
+              "channelTitle": "Example channel",
+              "publishedAt": "2026-07-27T01:00:00Z"
+            },
+            "contentDetails": {
+              "videoId": "XYgm-dNNrR8",
+              "videoPublishedAt": "2026-07-27T01:00:00Z"
+            }
+          }]
+        }
+        """.data(using: .utf8)!
+        let response = try JSONDecoder().decode(
+            PlaylistItemListResponse.self,
+            from: data
+        )
+        let videos = YouTubeAPIParser.videos(
+            from: response,
+            fallbackChannelTitle: "Fallback"
+        )
+        try expect(videos.count == 1, "YouTube playlist item should be parsed")
+        try expect(
+            videos[0].videoID == "XYgm-dNNrR8",
+            "YouTube video ID should be parsed"
+        )
+        try expect(
+            videos[0].channelTitle == "Example channel",
+            "YouTube channel title should be parsed"
+        )
     }
 
     private static func expect(
