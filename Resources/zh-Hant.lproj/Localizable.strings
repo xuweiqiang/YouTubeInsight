@@ -62,3 +62,16 @@
 "status.preparing" = "正在準備分析…";
 "welcome.description" = "輸入影片連結。應用程式會優先讀取字幕；沒有字幕時，會自動下載音訊並在本機使用 Whisper 轉錄。";
 "welcome.title" = "YouTube 影片分析";
+"action.retry" = "重試";
+"environment.checkingComponent" = "正在檢查 %@…";
+"environment.codexLoginRequired" = "Codex CLI 已安裝但尚未登入。請在終端機執行 codex login，然後重試。";
+"environment.failed" = "執行環境檢查失敗";
+"environment.homebrewRequired" = "請安裝 Homebrew，然後重試。";
+"environment.notReady" = "執行環境尚未準備完成，請重新執行啟動檢查。";
+"environment.npmRequired" = "安裝 Codex CLI 需要 Node.js 與 npm。";
+"environment.ready" = "執行環境已準備完成";
+"environment.repairFailed" = "無法準備 %@：%@";
+"environment.repairingComponent" = "正在修復 %@…";
+"environment.starting" = "正在檢查執行環境…";
+"environment.title" = "正在初始化 YouTubeInsight";
+"app.versionFormat" = "版本 %@（建置 %@）";

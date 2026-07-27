@@ -8,11 +8,15 @@ analysis and keeps a local, searchable history.
 ## Features
 
 - Accepts standard YouTube, YouTube Shorts, live, and `youtu.be` URLs.
+- Checks the runtime at launch, automatically repairs missing or broken tools
+  when possible, and shows actionable errors when user authorization is required.
 - Uses human or automatic YouTube captions when available.
 - Downloads audio and transcribes it locally with MLX Whisper when captions are unavailable.
 - Uses the signed-in Codex CLI to produce an overview and five numbered points.
 - Enforces a 500-character maximum for every analysis.
 - Saves the URL, title, date, transcript source, transcript, and analysis locally.
+- Shows the app version and build number in the sidebar. Rebuilding after a
+  source or resource update automatically generates a new build number.
 - Supports Simplified Chinese, Traditional Chinese, English, Japanese, Korean,
   Spanish, French, and German. Both the interface and new analyses follow the
   macOS language.
@@ -21,14 +25,16 @@ analysis and keeps a local, searchable history.
 
 ```mermaid
 flowchart LR
-    A[YouTube URL] --> B[Read metadata]
-    B --> C{Captions available?}
-    C -- Yes --> D[Parse captions]
-    C -- No --> E[Download audio]
-    E --> F[Local MLX Whisper]
-    D --> G[Codex analysis]
-    F --> G
-    G --> H[Display and save history]
+    A[Launch app] --> B[Check and repair runtime]
+    B --> C[YouTube URL]
+    C --> D[Read metadata]
+    D --> E{Captions available?}
+    E -- Yes --> F[Parse captions]
+    E -- No --> G[Download audio]
+    G --> H[Local MLX Whisper]
+    F --> I[Codex analysis]
+    H --> I
+    I --> J[Display and save history]
 ```
 
 History is stored at:
@@ -49,7 +55,9 @@ on disk so later runs do not download them again.
   static ffmpeg fallback execution
 - Codex CLI installed and signed in
 
-Install the runtime prerequisites:
+The launch check validates these tools. When Homebrew is available, the app can
+install or repair `uv`, Node.js/npm, and Codex CLI automatically. Codex account
+sign-in still requires user authorization:
 
 ```bash
 brew install uv
@@ -65,6 +73,12 @@ chmod +x scripts/build-app.sh scripts/run-tests.sh
 open dist/YouTubeInsight.app
 ```
 
+`CFBundleShortVersionString` in `Resources/Info.plist` controls the release
+version. The build script derives `CFBundleVersion` from the latest source or
+resource modification time, for example `1.3.0 (Build 20260727103000)`.
+Unchanged content keeps the same build number. Set
+`YOUTUBEINSIGHT_BUILD_NUMBER` to override it.
+
 Optional end-to-end smoke test:
 
 ```bash
@@ -72,8 +86,17 @@ chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh "https://www.youtube.com/watch?v=XYgm-dNNrR8"
 ```
 
+Check only the startup environment:
+
+```bash
+./scripts/smoke-test.sh --environment-only
+```
+
 The first captionless video downloads the selected Whisper model. Subsequent
 runs reuse the model cache.
+
+Whisper output is read as plain text so non-standard numeric values in model
+JSON metadata cannot invalidate an otherwise successful transcript.
 
 ## Language behavior
 
@@ -95,7 +118,11 @@ See [SECURITY.md](SECURITY.md) for the trust model and reporting instructions.
 
 ## Troubleshooting
 
-- **Missing `uvx`:** run `brew install uv`.
+- **Missing `uvx`:** choose **Retry** on the startup screen. The app repairs it
+  through Homebrew when available.
+- **“Could not prepare npm”:** Finder-launched apps receive a smaller PATH than
+  Terminal. The app now adds Homebrew and user tool directories automatically,
+  and checks npm only when Codex CLI actually needs to be installed.
 - **Codex analysis fails:** run `codex login` and confirm the configured model is
   available to the account.
 - **First transcription is slow:** wait for the selected Whisper model to finish

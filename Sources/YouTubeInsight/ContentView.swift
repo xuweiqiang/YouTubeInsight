@@ -5,11 +5,23 @@ struct ContentView: View {
     @FocusState private var isURLFieldFocused: Bool
 
     var body: some View {
-        NavigationSplitView {
-            sidebar
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
-        } detail: {
-            detail
+        ZStack {
+            NavigationSplitView {
+                sidebar
+                    .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+            } detail: {
+                detail
+            }
+            .disabled(model.environmentState != .ready)
+
+            if model.environmentState != .ready {
+                EnvironmentPreparationView(
+                    state: model.environmentState,
+                    message: model.environmentMessage,
+                    error: model.environmentError,
+                    retryAction: model.retryEnvironmentPreparation
+                )
+            }
         }
         .alert(
             L10n.string("error.alertTitle", fallback: "Analysis could not be completed"),
@@ -28,9 +40,17 @@ struct ContentView: View {
             isURLFieldFocused = true
         }
         .onAppear {
-            if model.records.isEmpty {
+            if model.records.isEmpty && model.environmentState == .ready {
                 isURLFieldFocused = true
             }
+        }
+        .onChange(of: model.environmentState) { state in
+            if state == .ready && model.records.isEmpty {
+                isURLFieldFocused = true
+            }
+        }
+        .task {
+            model.prepareEnvironmentIfNeeded()
         }
     }
 
@@ -89,6 +109,16 @@ struct ContentView: View {
                 }
                 .listStyle(.sidebar)
             }
+
+            Divider()
+
+            Text(AppVersion.localizedDescription)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
         }
     }
 
@@ -182,6 +212,59 @@ struct ContentView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+}
+
+private struct EnvironmentPreparationView: View {
+    let state: EnvironmentPreparationState
+    let message: String
+    let error: String?
+    let retryAction: () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.ultraThinMaterial)
+                .ignoresSafeArea()
+
+            VStack(spacing: 16) {
+                if state == .failed {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 38))
+                        .foregroundStyle(.orange)
+                } else {
+                    ProgressView()
+                        .controlSize(.large)
+                }
+
+                Text(L10n.string(
+                    "environment.title",
+                    fallback: "Preparing YouTubeInsight"
+                ))
+                    .font(.title2.weight(.semibold))
+
+                Text(message)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+
+                if let error {
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: 540)
+
+                    Button(
+                        L10n.string("action.retry", fallback: "Retry"),
+                        action: retryAction
+                    )
+                        .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(32)
+            .frame(maxWidth: 620)
+        }
     }
 }
 

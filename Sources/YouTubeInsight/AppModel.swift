@@ -1,6 +1,13 @@
 import AppKit
 import Foundation
 
+enum EnvironmentPreparationState: Equatable {
+    case idle
+    case preparing
+    case ready
+    case failed
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var urlInput = ""
@@ -9,16 +16,22 @@ final class AppModel: ObservableObject {
     @Published var isAnalyzing = false
     @Published var statusMessage = ""
     @Published var errorMessage: String?
+    @Published private(set) var environmentState: EnvironmentPreparationState = .idle
+    @Published private(set) var environmentMessage = ""
+    @Published private(set) var environmentError: String?
 
     private let store: HistoryStore
     private let pipeline: AnalysisPipeline
+    private let runtimeEnvironment: RuntimeEnvironment
 
     init(
         store: HistoryStore = HistoryStore(),
-        pipeline: AnalysisPipeline = AnalysisPipeline()
+        pipeline: AnalysisPipeline = AnalysisPipeline(),
+        runtimeEnvironment: RuntimeEnvironment = RuntimeEnvironment()
     ) {
         self.store = store
         self.pipeline = pipeline
+        self.runtimeEnvironment = runtimeEnvironment
         let loaded = store.load()
         records = loaded
         selectedRecordID = loaded.first?.id
@@ -31,8 +44,29 @@ final class AppModel: ObservableObject {
         return records.first(where: { $0.id == selectedRecordID })
     }
 
+    func prepareEnvironmentIfNeeded() {
+        guard environmentState == .idle else {
+            return
+        }
+        prepareEnvironment()
+    }
+
+    func retryEnvironmentPreparation() {
+        guard environmentState != .preparing else {
+            return
+        }
+        prepareEnvironment()
+    }
+
     func analyze() {
         guard !isAnalyzing else {
+            return
+        }
+        guard environmentState == .ready else {
+            errorMessage = environmentError ?? L10n.string(
+                "environment.notReady",
+                fallback: "The runtime environment is not ready. Retry the startup check."
+            )
             return
         }
         guard let url = YouTubeURLParser.canonicalURL(from: urlInput) else {
@@ -80,6 +114,38 @@ final class AppModel: ObservableObject {
                 statusMessage = L10n.string("status.failed", fallback: "Analysis failed")
             }
             isAnalyzing = false
+        }
+    }
+
+    private func prepareEnvironment() {
+        environmentState = .preparing
+        environmentError = nil
+        environmentMessage = L10n.string(
+            "environment.starting",
+            fallback: "Checking runtime environment…"
+        )
+
+        Task {
+            do {
+                try await runtimeEnvironment.prepare { [weak self] message in
+                    DispatchQueue.main.async {
+                        self?.environmentMessage = message
+                    }
+                }
+                environmentMessage = L10n.string(
+                    "environment.ready",
+                    fallback: "Runtime environment is ready"
+                )
+                environmentState = .ready
+            } catch {
+                environmentError = (error as? LocalizedError)?.errorDescription
+                    ?? error.localizedDescription
+                environmentMessage = L10n.string(
+                    "environment.failed",
+                    fallback: "Runtime environment check failed"
+                )
+                environmentState = .failed
+            }
         }
     }
 

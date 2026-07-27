@@ -24,7 +24,9 @@ struct ProcessRunner {
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = currentDirectory
-        process.environment = environment ?? ProcessInfo.processInfo.environment
+        process.environment = normalizedEnvironment(
+            environment ?? ProcessInfo.processInfo.environment
+        )
 
         let scratchDirectory = fileManager.temporaryDirectory
             .appendingPathComponent("YouTubeInsight-Process-\(UUID().uuidString)")
@@ -77,6 +79,33 @@ struct ProcessRunner {
             standardOutput: output,
             standardError: error
         )
+    }
+
+    private func normalizedEnvironment(
+        _ environment: [String: String]
+    ) -> [String: String] {
+        var normalized = environment
+        let home = normalized["HOME"] ?? fileManager.homeDirectoryForCurrentUser.path
+        var pathEntries = normalized["PATH"]?
+            .split(separator: ":")
+            .map(String.init) ?? []
+        let requiredDirectories = [
+            "\(home)/.local/bin",
+            "\(home)/.cargo/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/sbin",
+            "/usr/local/bin",
+            "/usr/local/sbin",
+            "/usr/bin",
+            "/bin",
+            "/usr/sbin",
+            "/sbin"
+        ]
+        for directory in requiredDirectories where !pathEntries.contains(directory) {
+            pathEntries.append(directory)
+        }
+        normalized["PATH"] = pathEntries.joined(separator: ":")
+        return normalized
     }
 }
 

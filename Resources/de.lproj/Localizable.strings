@@ -62,3 +62,16 @@
 "status.preparing" = "Analyse wird vorbereitet…";
 "welcome.description" = "Geben Sie eine Video-URL ein. Die App verwendet zuerst vorhandene Untertitel; andernfalls lädt sie das Audio herunter und transkribiert es lokal mit Whisper.";
 "welcome.title" = "YouTube-Videoanalyse";
+"action.retry" = "Erneut versuchen";
+"environment.checkingComponent" = "%@ wird geprüft…";
+"environment.codexLoginRequired" = "Codex CLI ist installiert, aber nicht angemeldet. Führen Sie codex login im Terminal aus und versuchen Sie es erneut.";
+"environment.failed" = "Laufzeitumgebung konnte nicht geprüft werden";
+"environment.homebrewRequired" = "Installieren Sie Homebrew und versuchen Sie es erneut.";
+"environment.notReady" = "Die Laufzeitumgebung ist noch nicht bereit. Wiederholen Sie die Startprüfung.";
+"environment.npmRequired" = "Node.js und npm werden zur Installation von Codex CLI benötigt.";
+"environment.ready" = "Laufzeitumgebung ist bereit";
+"environment.repairFailed" = "%@ konnte nicht vorbereitet werden: %@";
+"environment.repairingComponent" = "%@ wird repariert…";
+"environment.starting" = "Laufzeitumgebung wird geprüft…";
+"environment.title" = "YouTubeInsight wird vorbereitet";
+"app.versionFormat" = "Version %@ (Build %@)";

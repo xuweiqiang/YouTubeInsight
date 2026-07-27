@@ -62,3 +62,16 @@
 "status.preparing" = "准备分析…";
 "welcome.description" = "输入视频链接。应用会优先读取字幕；没有字幕时，自动下载音频并在本机使用 Whisper 转写。";
 "welcome.title" = "YouTube 视频分析";
+"action.retry" = "重试";
+"environment.checkingComponent" = "正在检查 %@…";
+"environment.codexLoginRequired" = "Codex CLI 已安装但尚未登录。请在终端运行 codex login，然后重试。";
+"environment.failed" = "运行环境检查失败";
+"environment.homebrewRequired" = "请安装 Homebrew，然后重试。";
+"environment.notReady" = "运行环境尚未准备完成，请重新执行启动检查。";
+"environment.npmRequired" = "安装 Codex CLI 需要 Node.js 和 npm。";
+"environment.ready" = "运行环境已准备完成";
+"environment.repairFailed" = "无法准备 %@：%@";
+"environment.repairingComponent" = "正在修复 %@…";
+"environment.starting" = "正在检查运行环境…";
+"environment.title" = "正在初始化 YouTubeInsight";
+"app.versionFormat" = "版本 %@（构建 %@）";

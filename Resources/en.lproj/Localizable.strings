@@ -62,3 +62,16 @@
 "status.preparing" = "Preparing analysis…";
 "welcome.description" = "Enter a video URL. The app uses available captions first, then downloads audio and transcribes it locally with Whisper when needed.";
 "welcome.title" = "YouTube Video Analysis";
+"action.retry" = "Retry";
+"environment.checkingComponent" = "Checking %@…";
+"environment.codexLoginRequired" = "Codex CLI is installed but not signed in. Run codex login in Terminal, then retry.";
+"environment.failed" = "Runtime environment check failed";
+"environment.homebrewRequired" = "Install Homebrew, then retry.";
+"environment.notReady" = "The runtime environment is not ready. Retry the startup check.";
+"environment.npmRequired" = "Node.js and npm are required to install Codex CLI.";
+"environment.ready" = "Runtime environment is ready";
+"environment.repairFailed" = "Could not prepare %@: %@";
+"environment.repairingComponent" = "Repairing %@…";
+"environment.starting" = "Checking runtime environment…";
+"environment.title" = "Preparing YouTubeInsight";
+"app.versionFormat" = "Version %@ (Build %@)";

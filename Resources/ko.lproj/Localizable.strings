@@ -62,3 +62,16 @@
 "status.preparing" = "분석 준비 중…";
 "welcome.description" = "동영상 URL을 입력하세요. 자막을 우선 사용하고, 자막이 없으면 오디오를 다운로드해 로컬 Whisper로 변환합니다.";
 "welcome.title" = "YouTube 동영상 분석";
+"action.retry" = "다시 시도";
+"environment.checkingComponent" = "%@ 확인 중…";
+"environment.codexLoginRequired" = "Codex CLI가 설치되어 있지만 로그인되지 않았습니다. 터미널에서 codex login을 실행한 후 다시 시도하세요.";
+"environment.failed" = "실행 환경 확인 실패";
+"environment.homebrewRequired" = "Homebrew를 설치한 후 다시 시도하세요.";
+"environment.notReady" = "실행 환경이 준비되지 않았습니다. 시작 검사를 다시 시도하세요.";
+"environment.npmRequired" = "Codex CLI를 설치하려면 Node.js와 npm이 필요합니다.";
+"environment.ready" = "실행 환경 준비 완료";
+"environment.repairFailed" = "%@을(를) 준비할 수 없습니다: %@";
+"environment.repairingComponent" = "%@ 복구 중…";
+"environment.starting" = "실행 환경 확인 중…";
+"environment.title" = "YouTubeInsight 준비 중";
+"app.versionFormat" = "버전 %@ (빌드 %@)";

@@ -67,6 +67,7 @@ final class AnalysisPipeline: @unchecked Sendable {
 
     private let runner = ProcessRunner()
     private let fileManager = FileManager.default
+    private let runtimeEnvironment = RuntimeEnvironment()
 
     func analyze(
         url: URL,
@@ -158,7 +159,7 @@ final class AnalysisPipeline: @unchecked Sendable {
                 "progress.preparingWhisper",
                 fallback: "Preparing local speech recognition (the model downloads on first use)…"
             ))
-            let whisperEnvironment = try whisperEnvironment(uvx: uvx)
+            let whisperEnvironment = try runtimeEnvironment.whisperEnvironment()
             progress(L10n.string(
                 "progress.transcribing",
                 fallback: "Transcribing audio with local Whisper…"
@@ -336,7 +337,7 @@ final class AnalysisPipeline: @unchecked Sendable {
                 "--model", model,
                 "--output-dir", workDirectory.path,
                 "--output-name", outputName,
-                "--output-format", "json",
+                "--output-format", "txt",
                 "--verbose", "False"
             ],
             currentDirectory: workDirectory,
@@ -349,16 +350,14 @@ final class AnalysisPipeline: @unchecked Sendable {
             )
         }
 
-        let outputURL = workDirectory.appendingPathComponent("\(outputName).json")
-        guard
-            let data = try? Data(contentsOf: outputURL),
-            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let text = object["text"] as? String,
-            let transcript = text.nilIfBlank
-        else {
-            throw PipelineError.emptyTranscript
+        let outputURL = workDirectory.appendingPathComponent("\(outputName).txt")
+        guard fileManager.fileExists(atPath: outputURL.path) else {
+            throw PipelineError.commandFailed(
+                L10n.string("command.whisper", fallback: "Whisper transcription"),
+                result.standardError.trimmedForError
+            )
         }
-        return cleanTranscript(transcript)
+        return cleanTranscript(try WhisperTranscript.read(from: outputURL))
     }
 
     private func summarize(
@@ -446,76 +445,6 @@ final class AnalysisPipeline: @unchecked Sendable {
         }
         allArguments += arguments
         return try runner.run(executable: uvx, arguments: allArguments)
-    }
-
-    private func whisperEnvironment(uvx: String) throws -> [String: String] {
-        if let ffmpeg = CommandLocator.locate("ffmpeg"),
-           let result = try? runner.run(executable: ffmpeg, arguments: ["-version"]),
-           result.succeeded {
-            return environment(prepending: URL(fileURLWithPath: ffmpeg).deletingLastPathComponent())
-        }
-
-        guard let uv = CommandLocator.locate("uv") else {
-            throw PipelineError.missingDependency(
-                "ffmpeg",
-                L10n.string(
-                    "guidance.installFFmpeg",
-                    fallback: "Run brew reinstall ffmpeg, or install uv to use the app's isolated fallback."
-                )
-            )
-        }
-
-        let result = try runner.run(
-            executable: uv,
-            arguments: [
-                "run",
-                "--with", "imageio-ffmpeg",
-                "python",
-                "-c",
-                "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"
-            ]
-        )
-        guard
-            result.succeeded,
-            let staticPath = result.standardOutput
-                .split(separator: "\n")
-                .map(String.init)
-                .last?
-                .nilIfBlank
-        else {
-            throw PipelineError.commandFailed(
-                L10n.string("command.staticFFmpeg", fallback: "Static ffmpeg setup"),
-                result.standardError.trimmedForError
-            )
-        }
-
-        let supportDirectory = fileManager.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let toolDirectory = supportDirectory
-            .appendingPathComponent("YouTubeInsight", isDirectory: true)
-            .appendingPathComponent("tools", isDirectory: true)
-        try fileManager.createDirectory(
-            at: toolDirectory,
-            withIntermediateDirectories: true
-        )
-        let linkURL = toolDirectory.appendingPathComponent("ffmpeg")
-        if fileManager.fileExists(atPath: linkURL.path) {
-            try fileManager.removeItem(at: linkURL)
-        }
-        try fileManager.createSymbolicLink(
-            at: linkURL,
-            withDestinationURL: URL(fileURLWithPath: staticPath)
-        )
-        return environment(prepending: toolDirectory)
-    }
-
-    private func environment(prepending directory: URL) -> [String: String] {
-        var environment = ProcessInfo.processInfo.environment
-        let existing = environment["PATH"] ?? "/usr/bin:/bin"
-        environment["PATH"] = "\(directory.path):\(existing)"
-        return environment
     }
 
     private func cleanTranscript(_ transcript: String) -> String {

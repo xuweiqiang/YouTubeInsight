@@ -15,6 +15,8 @@ swiftc \
     Sources/YouTubeInsight/YouTubeURLParser.swift \
     Sources/YouTubeInsight/SubtitleParser.swift \
     Sources/YouTubeInsight/ProcessRunner.swift \
+    Sources/YouTubeInsight/RuntimeEnvironment.swift \
+    Sources/YouTubeInsight/WhisperTranscript.swift \
     Sources/YouTubeInsight/AnalysisPipeline.swift \
     Tests/PipelineSmoke.swift
 

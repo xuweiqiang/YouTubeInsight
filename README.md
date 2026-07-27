@@ -7,6 +7,7 @@
 ## 功能
 
 - 输入常见形式的 YouTube、YouTube Shorts 或 `youtu.be` 链接。
+- 启动时检查运行环境；依赖缺失或损坏时自动尝试修复，并在无法自动处理时给出明确提示。
 - 优先下载视频已有的人工或自动字幕。
 - 没有字幕时，自动下载音频并使用 Apple Silicon 优化的 MLX Whisper 本地转写。
 - 调用本机已登录的 Codex CLI 生成结构化分析。
@@ -14,19 +15,22 @@
 - 根据 macOS 系统语言自动显示简体中文、繁体中文、英语、日语、韩语、西班牙语、法语或德语；分析结果使用同一语言。
 - 自动保存视频链接、标题、分析时间、转写稿和最终分析。
 - 支持查看历史、复制分析、打开原视频和删除记录。
+- 在侧边栏显示应用版本和构建号；源码或资源更新后重新构建时，构建号自动更新。
 
 ## 工作流程
 
 ```mermaid
 flowchart LR
-    A[YouTube 链接] --> B[读取视频信息]
-    B --> C{存在字幕?}
-    C -- 是 --> D[解析字幕]
-    C -- 否 --> E[下载音频]
-    E --> F[本地 MLX Whisper 转写]
-    D --> G[Codex 分析]
-    F --> G
-    G --> H[显示并保存历史]
+    A[启动客户端] --> B[检查并修复运行环境]
+    B --> C[YouTube 链接]
+    C --> D[读取视频信息]
+    D --> E{存在字幕?}
+    E -- 是 --> F[解析字幕]
+    E -- 否 --> G[下载音频]
+    G --> H[本地 MLX Whisper 转写]
+    F --> I[Codex 分析]
+    H --> I
+    I --> J[显示并保存历史]
 ```
 
 历史记录保存在：
@@ -43,7 +47,8 @@ flowchart LR
 - `uv`：负责隔离运行最新版 `yt-dlp`、`mlx-whisper` 和静态 ffmpeg 回退
 - 已安装并登录的 Codex CLI
 
-安装运行依赖：
+应用会在启动时验证这些依赖。若 Homebrew 可用，会自动安装或修复缺失的
+`uv`、Node.js/npm 和 Codex CLI；Codex 账号登录仍需用户授权：
 
 ```bash
 brew install uv
@@ -67,11 +72,22 @@ chmod +x scripts/run-tests.sh
 open dist/YouTubeInsight.app
 ```
 
+正式版本由 `Resources/Info.plist` 中的 `CFBundleShortVersionString` 管理。
+构建号根据源码和资源的最近更新时间自动生成，例如
+`1.3.0（构建 20260727103000）`。相同内容重复构建时保持不变，也可以通过
+`YOUTUBEINSIGHT_BUILD_NUMBER` 环境变量覆盖。
+
 可选的真实视频端到端检查：
 
 ```bash
 chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh "https://www.youtube.com/watch?v=XYgm-dNNrR8"
+```
+
+只检查启动环境：
+
+```bash
+./scripts/smoke-test.sh --environment-only
 ```
 
 ## 首次分析说明
@@ -83,6 +99,9 @@ chmod +x scripts/smoke-test.sh
 应用优先使用系统中正常工作的 ffmpeg。如果 Homebrew ffmpeg 因动态库版本
 问题无法运行，应用会通过 `imageio-ffmpeg` 自动准备隔离的静态版本，不修改
 现有 Homebrew 安装。
+
+Whisper 使用纯文本文件交付转写结果，避免模型输出中的非标准 JSON 数值导致
+有效文字被误判为空。
 
 ## 支持的语言
 
@@ -109,9 +128,14 @@ chmod +x scripts/smoke-test.sh
 
 ### 提示缺少 `uvx`
 
-```bash
-brew install uv
-```
+点击初始化界面的“重试”，应用会通过 Homebrew 自动修复。若 Homebrew 本身
+未安装，请先安装 Homebrew。
+
+### 提示“无法准备 npm”
+
+macOS 从 Finder 启动应用时提供的 PATH 比终端精简。当前版本会自动补齐
+Homebrew 和用户工具目录，并且只在 Codex CLI 缺失、确实需要安装时才检查
+npm，不会因为 GUI 环境找不到 Node 而重装 npm。
 
 ### Codex 无法生成分析
 

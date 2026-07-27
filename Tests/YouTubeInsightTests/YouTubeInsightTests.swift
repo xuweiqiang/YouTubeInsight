@@ -64,6 +64,46 @@ final class YouTubeInsightTests: XCTestCase {
         XCTAssertEqual(store.load(), [record])
     }
 
+    func testReadsPlainTextWhisperTranscript() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("YouTubeInsightTranscriptTest-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        defer {
+            try? FileManager.default.removeItem(at: directory)
+        }
+
+        let outputURL = directory.appendingPathComponent("transcript.txt")
+        try "  有效的转写文字  \n".write(
+            to: outputURL,
+            atomically: true,
+            encoding: .utf8
+        )
+
+        XCTAssertEqual(
+            try WhisperTranscript.read(from: outputURL),
+            "有效的转写文字"
+        )
+    }
+
+    func testProcessRunnerAddsHomebrewToolsToMinimalGUIPath() throws {
+        guard CommandLocator.locate("node") != nil else {
+            throw XCTSkip("Node is not installed on this Mac")
+        }
+        let result = try ProcessRunner().run(
+            executable: "/usr/bin/env",
+            arguments: ["node", "--version"],
+            environment: [
+                "HOME": FileManager.default.homeDirectoryForCurrentUser.path,
+                "PATH": "/usr/bin:/bin"
+            ]
+        )
+
+        XCTAssertTrue(result.succeeded, result.standardError)
+    }
+
     func testAnalysisFormatterEnforcesFiveHundredCharacterLimit() {
         let result = AnalysisFormatter.capped(String(repeating: "字", count: 700))
         XCTAssertEqual(result.count, 500)

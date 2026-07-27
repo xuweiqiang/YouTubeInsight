@@ -62,3 +62,16 @@
 "status.preparing" = "Préparation de l’analyse…";
 "welcome.description" = "Saisissez l’URL d’une vidéo. L’application utilise d’abord les sous-titres disponibles ; sinon, elle télécharge l’audio et le transcrit localement avec Whisper.";
 "welcome.title" = "Analyse de vidéos YouTube";
+"action.retry" = "Réessayer";
+"environment.checkingComponent" = "Vérification de %@…";
+"environment.codexLoginRequired" = "Codex CLI est installé, mais vous n’êtes pas connecté. Exécutez codex login dans le Terminal, puis réessayez.";
+"environment.failed" = "Échec de la vérification de l’environnement";
+"environment.homebrewRequired" = "Installez Homebrew, puis réessayez.";
+"environment.notReady" = "L’environnement n’est pas prêt. Relancez la vérification initiale.";
+"environment.npmRequired" = "Node.js et npm sont requis pour installer Codex CLI.";
+"environment.ready" = "L’environnement est prêt";
+"environment.repairFailed" = "Impossible de préparer %@ : %@";
+"environment.repairingComponent" = "Réparation de %@…";
+"environment.starting" = "Vérification de l’environnement…";
+"environment.title" = "Préparation de YouTubeInsight";
+"app.versionFormat" = "Version %@ (build %@)";

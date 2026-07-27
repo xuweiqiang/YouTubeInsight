@@ -62,3 +62,16 @@
 "status.preparing" = "分析を準備しています…";
 "welcome.description" = "動画URLを入力してください。利用可能な字幕を優先し、ない場合は音声をダウンロードしてローカルのWhisperで文字起こしします。";
 "welcome.title" = "YouTube動画分析";
+"action.retry" = "再試行";
+"environment.checkingComponent" = "%@を確認しています…";
+"environment.codexLoginRequired" = "Codex CLIはインストール済みですが、サインインしていません。ターミナルで codex login を実行してから再試行してください。";
+"environment.failed" = "実行環境の確認に失敗しました";
+"environment.homebrewRequired" = "Homebrewをインストールしてから再試行してください。";
+"environment.notReady" = "実行環境の準備ができていません。起動チェックを再試行してください。";
+"environment.npmRequired" = "Codex CLIのインストールにはNode.jsとnpmが必要です。";
+"environment.ready" = "実行環境の準備が完了しました";
+"environment.repairFailed" = "%@を準備できませんでした：%@";
+"environment.repairingComponent" = "%@を修復しています…";
+"environment.starting" = "実行環境を確認しています…";
+"environment.title" = "YouTubeInsightを準備しています";
+"app.versionFormat" = "バージョン %@（ビルド %@）";
