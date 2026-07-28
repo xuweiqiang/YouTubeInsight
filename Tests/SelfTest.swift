@@ -13,8 +13,10 @@ struct SelfTest {
         try testYouTubeOAuthCredentialImport()
         try testYouTubePlaylistParsing()
         try testYouTubeUnavailablePlaylistErrorHandling()
+        try testYouTubeQuotaPolicy()
         try testYouTubeRecentVideoQueue()
         try testYTDLPForbiddenRecovery()
+        try testYTDLPMetadataRecovery()
         try testHistoryScrollPolicy()
         try testVideoPublicationDateParsing()
         try testLeanCodexSummaryInvocation()
@@ -282,6 +284,54 @@ struct SelfTest {
         )
     }
 
+    private static func testYouTubeQuotaPolicy() throws {
+        let quotaError = YouTubeAPIError.requestFailed(
+            403,
+            reason: "quotaExceeded",
+            details: """
+            The request cannot be completed because you have exceeded your \
+            <a href="/youtube/v3/getting-started#quota">quota</a>.
+            """
+        )
+        try expect(
+            quotaError.isQuotaExceeded,
+            "quotaExceeded should be classified separately from authorization failures"
+        )
+        try expect(
+            !quotaError.localizedDescription.contains("<a"),
+            "quota errors should not expose HTML returned by YouTube"
+        )
+        try expect(
+            YouTubeQuotaPolicy.scanInterval(channelCount: 50) == 15 * 60,
+            "small subscription lists should retain the 15-minute interval"
+        )
+        try expect(
+            YouTubeQuotaPolicy.scanInterval(channelCount: 500) >= 90 * 60,
+            "large subscription lists should use a quota-safe interval"
+        )
+
+        let formatter = ISO8601DateFormatter()
+        let beforePacificMidnight = formatter.date(
+            from: "2026-07-28T06:30:00Z"
+        )!
+        let expectedRetry = formatter.date(
+            from: "2026-07-28T07:05:00Z"
+        )!
+        try expect(
+            YouTubeQuotaPolicy.quotaRetryDate(after: beforePacificMidnight)
+                == expectedRetry,
+            "quota retry should wait until Pacific midnight plus a safety margin"
+        )
+        try expect(
+            !YouTubeQuotaPolicy.shouldScan(
+                lastRefresh: beforePacificMidnight,
+                channelCount: 500,
+                now: beforePacificMidnight.addingTimeInterval(30 * 60)
+            ),
+            "automatic scans should respect the quota-safe interval"
+        )
+    }
+
     private static func testYTDLPForbiddenRecovery() throws {
         let attempts = YTDLPRecovery.audioDownloadAttempts(
             template: "/tmp/source.%(ext)s",
@@ -320,6 +370,58 @@ struct SelfTest {
                 )
             ),
             "non-403 failures should not be retried as forbidden responses"
+        )
+    }
+
+    private static func testYTDLPMetadataRecovery() throws {
+        let attempts = YTDLPRecovery.metadataAttempts(
+            videoURL: "https://www.youtube.com/watch?v=XYgm-dNNrR8"
+        )
+        try expect(
+            attempts.count == 2,
+            "metadata extraction should have one bounded recovery attempt"
+        )
+        try expect(
+            attempts[0].arguments.contains("--extractor-retries")
+                && !attempts[0].refreshPackage,
+            "the initial metadata attempt should retry transient extractor failures"
+        )
+        try expect(
+            attempts[1].refreshPackage
+                && attempts[1].arguments.contains("--force-ipv4")
+                && attempts[1].arguments.contains("--no-cache-dir"),
+            "metadata recovery should refresh yt-dlp and bypass stale network state"
+        )
+
+        let failure = ProcessResult(
+            exitCode: 1,
+            standardOutput: "",
+            standardError: "ERROR: Sign in to confirm you’re not a bot"
+        )
+        try expect(
+            YTDLPRecovery.failureDetails(from: failure)
+                == "ERROR: Sign in to confirm you’re not a bot",
+            "metadata failures should preserve yt-dlp's actionable error"
+        )
+
+        let upcomingLiveEvent = ProcessResult(
+            exitCode: 1,
+            standardOutput: "null\n",
+            standardError: """
+            ERROR: [youtube] CeJCJpCuaVo: This live event will begin in a few moments.
+            """
+        )
+        try expect(
+            YTDLPRecovery.isUpcomingLiveEvent(upcomingLiveEvent),
+            "an upcoming live event should be classified separately from failures"
+        )
+        try expect(
+            !YTDLPRecovery.failureDetails(from: upcomingLiveEvent).contains("null"),
+            "a null yt-dlp JSON payload should not be shown as an error detail"
+        )
+        try expect(
+            PipelineError.upcomingLiveEvent.isUpcomingLiveEvent,
+            "the pipeline should expose upcoming live events to automatic analysis"
         )
     }
 

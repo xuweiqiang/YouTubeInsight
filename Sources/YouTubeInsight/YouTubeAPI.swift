@@ -64,6 +64,16 @@ enum YouTubeAPIError: LocalizedError {
         }
     }
 
+    var isQuotaExceeded: Bool {
+        switch self {
+        case let .requestFailed(status, reason, _):
+            return status == 403
+                && (reason == "quotaExceeded" || reason == "dailyLimitExceeded")
+        case .invalidResponse:
+            return false
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .invalidResponse:
@@ -71,13 +81,78 @@ enum YouTubeAPIError: LocalizedError {
                 "youtube.error.invalidResponse",
                 fallback: "YouTube returned an unreadable response."
             )
-        case let .requestFailed(status, _, details):
+        case let .requestFailed(status, reason, details):
+            if status == 403
+                && (reason == "quotaExceeded" || reason == "dailyLimitExceeded") {
+                return YouTubeQuotaPolicy.quotaExceededMessage
+            }
             return L10n.format(
                 "youtube.error.api",
                 fallback: "YouTube API request failed (%d): %@",
                 status,
                 details
             )
+        }
+    }
+}
+
+enum YouTubeQuotaPolicy {
+    private static let dailyScanBudget = 8_000
+    private static let minimumScanInterval: TimeInterval = 15 * 60
+    private static let resetSafetyMargin: TimeInterval = 5 * 60
+
+    static func scanInterval(channelCount: Int) -> TimeInterval {
+        let count = max(channelCount, 1)
+        let pages = Int(ceil(Double(count) / 50.0))
+        let estimatedRequestsPerScan = count + (2 * pages)
+        let scansPerDay = max(1, dailyScanBudget / estimatedRequestsPerScan)
+        let budgetedInterval = ceil(24 * 60 * 60 / Double(scansPerDay))
+        return max(minimumScanInterval, budgetedInterval)
+    }
+
+    static func shouldScan(
+        lastRefresh: Date?,
+        channelCount: Int,
+        now: Date = Date()
+    ) -> Bool {
+        guard let lastRefresh else {
+            return true
+        }
+        return now.timeIntervalSince(lastRefresh)
+            >= scanInterval(channelCount: channelCount)
+    }
+
+    static func quotaRetryDate(after date: Date = Date()) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")
+            ?? TimeZone(secondsFromGMT: -8 * 60 * 60)!
+        let startOfDay = calendar.startOfDay(for: date)
+        let nextDay = calendar.date(
+            byAdding: .day,
+            value: 1,
+            to: startOfDay
+        ) ?? date.addingTimeInterval(24 * 60 * 60)
+        return nextDay.addingTimeInterval(resetSafetyMargin)
+    }
+
+    static var quotaExceededMessage: String {
+        switch AppLanguage.current {
+        case .english:
+            return "The YouTube API daily quota is exhausted. Automatic scanning will resume after the quota resets at midnight Pacific Time."
+        case .simplifiedChinese:
+            return "YouTube API 今日配额已用完。配额在太平洋时间午夜重置后，自动扫描将继续。"
+        case .traditionalChinese:
+            return "YouTube API 今日配額已用完。配額在太平洋時間午夜重設後，自動掃描將繼續。"
+        case .japanese:
+            return "YouTube API の本日の割り当てを使い切りました。太平洋時間の午前0時にリセットされた後、自動スキャンを再開します。"
+        case .korean:
+            return "오늘의 YouTube API 할당량을 모두 사용했습니다. 태평양 시간 자정에 재설정된 후 자동 검색을 재개합니다."
+        case .spanish:
+            return "Se agotó la cuota diaria de la API de YouTube. El análisis automático continuará cuando se restablezca a medianoche, hora del Pacífico."
+        case .french:
+            return "Le quota quotidien de l’API YouTube est épuisé. L’analyse automatique reprendra après sa réinitialisation à minuit, heure du Pacifique."
+        case .german:
+            return "Das tägliche YouTube-API-Kontingent ist aufgebraucht. Die automatische Suche wird nach der Rücksetzung um Mitternacht pazifischer Zeit fortgesetzt."
         }
     }
 }
@@ -135,7 +210,7 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
         since cutoff: Date,
         progress: @escaping ProgressHandler,
         discovered: @escaping DiscoveryHandler
-    ) async throws {
+    ) async throws -> Int {
         progress(L10n.string(
             "youtube.status.fetchingSubscriptions",
             fallback: "Reading subscribed channels…"
@@ -144,7 +219,7 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             configuration: configuration
         )
         guard !subscriptions.isEmpty else {
-            return
+            return 0
         }
 
         progress(L10n.format(
@@ -157,7 +232,7 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             configuration: configuration
         )
         guard !channels.isEmpty else {
-            return
+            return subscriptions.count
         }
 
         try await withThrowingTaskGroup(
@@ -205,6 +280,7 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
                 }
             }
         }
+        return subscriptions.count
     }
 
     private func scanChannel(

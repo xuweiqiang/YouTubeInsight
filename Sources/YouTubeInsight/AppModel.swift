@@ -40,7 +40,18 @@ final class AppModel: ObservableObject {
     private var automaticVideoQueue = YouTubeRecentVideoQueue()
     private var automaticDiscoveryFinished = true
     private var automaticDiscoveredCount = 0
-    private let monitorInterval: UInt64 = 15 * 60 * 1_000_000_000
+    private let subscriptionChannelCountKey = "youtubeSubscriptionChannelCount"
+    private let quotaRetryAfterKey = "youtubeQuotaRetryAfter"
+
+    private var monitorInterval: UInt64 {
+        let channelCount = UserDefaults.standard.integer(
+            forKey: subscriptionChannelCountKey
+        )
+        return UInt64(
+            YouTubeQuotaPolicy.scanInterval(channelCount: channelCount)
+                * 1_000_000_000
+        )
+    }
 
     init(
         store: HistoryStore = HistoryStore(),
@@ -117,7 +128,7 @@ final class AppModel: ObservableObject {
                     fallback: "YouTube account connected"
                 )
                 beginYouTubeMonitoringIfNeeded()
-                await refreshSubscriptionsNow()
+                await refreshSubscriptionsNow(force: true)
             } catch {
                 youtubeConnectionState = .disconnected
                 errorMessage = (error as? LocalizedError)?.errorDescription
@@ -152,7 +163,7 @@ final class AppModel: ObservableObject {
 
     func refreshSubscriptions() {
         Task {
-            await refreshSubscriptionsNow()
+            await refreshSubscriptionsNow(force: true)
         }
     }
 
@@ -281,12 +292,35 @@ final class AppModel: ObservableObject {
         )
     }
 
-    private func refreshSubscriptionsNow() async {
+    private func refreshSubscriptionsNow(force: Bool = false) async {
         guard environmentState == .ready,
               !isRefreshingSubscriptions,
               !isAnalyzing,
               case .connected = youtubeConnectionState,
               let configuration = YouTubeOAuthConfiguration.current else {
+            return
+        }
+
+        let now = Date()
+        if let retryAfter = UserDefaults.standard.object(
+            forKey: quotaRetryAfterKey
+        ) as? Date {
+            if retryAfter > now {
+                errorMessage = YouTubeQuotaPolicy.quotaExceededMessage
+                statusMessage = YouTubeQuotaPolicy.quotaExceededMessage
+                return
+            }
+            UserDefaults.standard.removeObject(forKey: quotaRetryAfterKey)
+        }
+
+        let knownChannelCount = UserDefaults.standard.integer(
+            forKey: subscriptionChannelCountKey
+        )
+        guard force || YouTubeQuotaPolicy.shouldScan(
+            lastRefresh: lastSubscriptionRefresh,
+            channelCount: knownChannelCount,
+            now: now
+        ) else {
             return
         }
 
@@ -306,13 +340,14 @@ final class AppModel: ObservableObject {
             automaticDiscoveryFinished = false
             automaticDiscoveredCount = 0
 
-            async let discovery: Void = discoverAutomaticVideos(
+            async let discovery: Int = discoverAutomaticVideos(
                 configuration: configuration,
                 cutoff: cutoff
             )
 
             var succeeded = 0
             var failed = 0
+            var deferred = 0
             while !automaticDiscoveryFinished || !automaticVideoQueue.isEmpty {
                 guard !Task.isCancelled else {
                     return
@@ -332,13 +367,17 @@ final class AppModel: ObservableObject {
                 statusMessage = L10n.format(
                     "youtube.status.analyzingVideo",
                     fallback: "Analyzing %d/%d: %@",
-                    succeeded + failed + 1,
+                    succeeded + failed + deferred + 1,
                     automaticDiscoveredCount,
                     video.title
                 )
                 do {
                     try await analyzeAutomatically(video)
                     succeeded += 1
+                } catch let pipelineError as PipelineError
+                    where pipelineError.isUpcomingLiveEvent {
+                    deferred += 1
+                    attemptedVideoIDs.remove(video.videoID)
                 } catch {
                     failed += 1
                     errorMessage = (error as? LocalizedError)?.errorDescription
@@ -347,9 +386,13 @@ final class AppModel: ObservableObject {
                 isAnalyzing = false
                 pendingAutomaticAnalyses = automaticVideoQueue.count
             }
-            try await discovery
+            let channelCount = try await discovery
+            UserDefaults.standard.set(
+                channelCount,
+                forKey: subscriptionChannelCountKey
+            )
 
-            guard succeeded + failed > 0 else {
+            guard succeeded + failed + deferred > 0 else {
                 completeSubscriptionRefresh(
                     status: L10n.string(
                         "youtube.status.noNewVideos",
@@ -359,7 +402,9 @@ final class AppModel: ObservableObject {
                 return
             }
 
-            let status = failed == 0
+            let status = succeeded == 0 && failed == 0 && deferred > 0
+                ? PipelineError.upcomingLiveEvent.localizedDescription
+                : failed == 0
                 ? L10n.format(
                     "youtube.status.refreshComplete",
                     fallback: "%d new videos analyzed and saved",
@@ -372,6 +417,11 @@ final class AppModel: ObservableObject {
                     failed
                 )
             completeSubscriptionRefresh(status: status)
+        } catch let error as YouTubeAPIError where error.isQuotaExceeded {
+            let retryAfter = YouTubeQuotaPolicy.quotaRetryDate()
+            UserDefaults.standard.set(retryAfter, forKey: quotaRetryAfterKey)
+            errorMessage = error.localizedDescription
+            statusMessage = YouTubeQuotaPolicy.quotaExceededMessage
         } catch YouTubeOAuthError.authorizationRequired {
             youtubeConnectionState = .disconnected
             UserDefaults.standard.removeObject(forKey: "youtubeAccountDisplayName")
@@ -393,11 +443,11 @@ final class AppModel: ObservableObject {
     private func discoverAutomaticVideos(
         configuration: YouTubeOAuthConfiguration,
         cutoff: Date
-    ) async throws {
+    ) async throws -> Int {
         defer {
             automaticDiscoveryFinished = true
         }
-        try await youtubeService.discoverRecentUploads(
+        return try await youtubeService.discoverRecentUploads(
             configuration: configuration,
             since: cutoff
         ) { [weak self] message in

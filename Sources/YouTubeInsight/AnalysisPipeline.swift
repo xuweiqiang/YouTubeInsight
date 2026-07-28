@@ -5,6 +5,7 @@ enum PipelineError: LocalizedError {
     case commandFailed(String, String)
     case processLaunchFailed(String, String)
     case invalidMetadata
+    case upcomingLiveEvent
     case invalidCaptionFile
     case noAudioDownloaded
     case emptyTranscript
@@ -38,6 +39,25 @@ enum PipelineError: LocalizedError {
                 "error.invalidMetadata",
                 fallback: "Could not read the YouTube video information. Make sure the video is public and YouTube is reachable."
             )
+        case .upcomingLiveEvent:
+            switch AppLanguage.current {
+            case .english:
+                return "This YouTube live event has not started. Try again after it begins."
+            case .simplifiedChinese:
+                return "该 YouTube 直播尚未开始，请在开播后重试。"
+            case .traditionalChinese:
+                return "此 YouTube 直播尚未開始，請在開播後重試。"
+            case .japanese:
+                return "この YouTube ライブ配信はまだ開始されていません。開始後にもう一度お試しください。"
+            case .korean:
+                return "이 YouTube 라이브 방송은 아직 시작되지 않았습니다. 시작 후 다시 시도하세요."
+            case .spanish:
+                return "Este directo de YouTube aún no ha comenzado. Inténtalo de nuevo cuando empiece."
+            case .french:
+                return "Ce direct YouTube n’a pas encore commencé. Réessayez après son démarrage."
+            case .german:
+                return "Dieser YouTube-Livestream hat noch nicht begonnen. Versuchen Sie es nach dem Start erneut."
+            }
         case .invalidCaptionFile:
             return L10n.string(
                 "error.invalidCaptionFile",
@@ -60,6 +80,13 @@ enum PipelineError: LocalizedError {
             )
         }
     }
+
+    var isUpcomingLiveEvent: Bool {
+        if case .upcomingLiveEvent = self {
+            return true
+        }
+        return false
+    }
 }
 
 struct YTDLPInvocation: Equatable {
@@ -68,6 +95,32 @@ struct YTDLPInvocation: Equatable {
 }
 
 enum YTDLPRecovery {
+    static func metadataAttempts(videoURL: String) -> [YTDLPInvocation] {
+        let retryArguments = [
+            "--retries", "3",
+            "--extractor-retries", "3",
+            "--retry-sleep", "1"
+        ]
+        let metadataArguments = [
+            "--skip-download",
+            "--dump-single-json",
+            "--no-warnings"
+        ]
+        return [
+            YTDLPInvocation(
+                arguments: retryArguments + metadataArguments + [videoURL],
+                refreshPackage: false
+            ),
+            YTDLPInvocation(
+                arguments: [
+                    "--force-ipv4",
+                    "--no-cache-dir"
+                ] + retryArguments + metadataArguments + [videoURL],
+                refreshPackage: true
+            )
+        ]
+    }
+
     static func audioDownloadAttempts(
         template: String,
         videoURL: String,
@@ -106,6 +159,25 @@ enum YTDLPRecovery {
         let details = "\(result.standardError)\n\(result.standardOutput)".lowercased()
         return details.contains("http error 403")
             || details.contains("403: forbidden")
+    }
+
+    static func isUpcomingLiveEvent(_ result: ProcessResult) -> Bool {
+        let details = "\(result.standardError)\n\(result.standardOutput)".lowercased()
+        return details.contains("this live event will begin")
+            || details.contains("this premiere will begin")
+            || details.contains("premieres in ")
+            || details.contains("premiere will begin")
+    }
+
+    static func failureDetails(from result: ProcessResult) -> String {
+        let combined = [result.standardError, result.standardOutput]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0.lowercased() != "null" }
+            .joined(separator: "\n")
+        guard !combined.isEmpty else {
+            return L10n.string("error.unknown", fallback: "Unknown error")
+        }
+        return String(combined.suffix(2_000))
     }
 }
 
@@ -316,25 +388,41 @@ final class AnalysisPipeline: @unchecked Sendable {
         uvx: String,
         workDirectory: URL
     ) throws -> VideoMetadata {
-        let result = try runYTDLP(
-            uvx: uvx,
-            arguments: [
-                "--skip-download",
-                "--dump-single-json",
-                "--no-warnings",
-                url.absoluteString
-            ]
+        let attempts = YTDLPRecovery.metadataAttempts(
+            videoURL: url.absoluteString
         )
-        guard
-            result.succeeded,
-            let data = result.standardOutput.data(using: .utf8),
-            let values = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            throw PipelineError.invalidMetadata
+        var lastFailure: ProcessResult?
+        for attempt in attempts {
+            let result = try runYTDLP(
+                uvx: uvx,
+                arguments: attempt.arguments,
+                refreshPackage: attempt.refreshPackage
+            )
+            guard result.succeeded else {
+                if YTDLPRecovery.isUpcomingLiveEvent(result) {
+                    throw PipelineError.upcomingLiveEvent
+                }
+                lastFailure = result
+                continue
+            }
+            guard
+                let data = result.standardOutput.data(using: .utf8),
+                let values = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
+            }
+            let fileURL = workDirectory.appendingPathComponent("metadata.json")
+            try data.write(to: fileURL, options: .atomic)
+            return VideoMetadata(values: values, fileURL: fileURL)
         }
-        let fileURL = workDirectory.appendingPathComponent("metadata.json")
-        try data.write(to: fileURL, options: .atomic)
-        return VideoMetadata(values: values, fileURL: fileURL)
+
+        if let lastFailure {
+            throw PipelineError.commandFailed(
+                "yt-dlp",
+                YTDLPRecovery.failureDetails(from: lastFailure)
+            )
+        }
+        throw PipelineError.invalidMetadata
     }
 
     private struct CaptionChoice {
