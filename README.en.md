@@ -5,6 +5,28 @@ new video from the last 24 hours, and keeps a local, searchable history.
 
 [简体中文](README.md) · English
 
+## Interface preview
+
+![YouTubeInsight main window with thumbnails, history, and structured results](docs/media/YouTubeInsight-overview.png)
+
+The screenshot uses public demonstration data and contains no real YouTube
+account or personal analysis history.
+
+## 30-second usage video
+
+[![YouTubeInsight 30-second quick-start video](docs/media/YouTubeInsight-quickstart.gif)](docs/media/YouTubeInsight-quickstart.mp4)
+
+Choose the animated preview above to open the high-quality MP4. Basic usage:
+
+1. **Manual analysis:** paste a YouTube, Shorts, or `youtu.be` URL into the top
+   field and choose **Analyze**. The completed result is saved to history.
+2. **Automatic analysis:** import a Google OAuth Desktop app JSON in Settings
+   and bind the account. The app checks subscription uploads from the previous
+   24 hours and refreshes every 15 minutes while running.
+3. **Read and reuse:** choose a thumbnail or title in the sidebar to read the
+   short overview and five takeaways, open the original video, or copy the
+   analysis.
+
 ## Features
 
 - Binds a YouTube account in the system browser with read-only Google OAuth.
