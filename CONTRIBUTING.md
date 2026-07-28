@@ -40,6 +40,15 @@ chmod +x scripts/smoke-test.sh
 ./scripts/smoke-test.sh "https://www.youtube.com/watch?v=XYgm-dNNrR8"
 ```
 
+The smoke test prints elapsed time for metadata, caption/audio retrieval,
+transcription, and Codex analysis. To benchmark a different local transcription
+model without changing app preferences:
+
+```bash
+YOUTUBEINSIGHT_SMOKE_WHISPER_MODEL="mlx-community/whisper-small-mlx" \
+  ./scripts/smoke-test.sh "https://www.youtube.com/watch?v=VIDEO_ID"
+```
+
 The smoke test downloads audio and may use a logged-in Codex account. Do not run
 it with private or confidential media unless that use complies with your account
 and organizational policies.

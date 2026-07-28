@@ -62,6 +62,105 @@ enum PipelineError: LocalizedError {
     }
 }
 
+struct YTDLPInvocation: Equatable {
+    let arguments: [String]
+    let refreshPackage: Bool
+}
+
+enum YTDLPRecovery {
+    static func audioDownloadAttempts(
+        template: String,
+        videoURL: String,
+        metadataPath: String
+    ) -> [YTDLPInvocation] {
+        let retryArguments = [
+            "--retries", "3",
+            "--fragment-retries", "3",
+            "--extractor-retries", "3",
+            "--retry-sleep", "1"
+        ]
+        let downloadArguments = [
+            "-f", "bestaudio[abr<=80]/bestaudio/best",
+            "--output", template
+        ]
+        return [
+            YTDLPInvocation(
+                arguments: retryArguments
+                    + downloadArguments
+                    + ["--load-info-json", metadataPath],
+                refreshPackage: false
+            ),
+            YTDLPInvocation(
+                arguments: [
+                    "--force-ipv4",
+                    "--no-continue"
+                ] + retryArguments
+                    + downloadArguments
+                    + [videoURL],
+                refreshPackage: true
+            )
+        ]
+    }
+
+    static func shouldRetryAfterForbidden(_ result: ProcessResult) -> Bool {
+        let details = "\(result.standardError)\n\(result.standardOutput)".lowercased()
+        return details.contains("http error 403")
+            || details.contains("403: forbidden")
+    }
+}
+
+enum VideoPublicationDate {
+    static func parse(from metadata: [String: Any]) -> Date? {
+        for key in ["release_timestamp", "timestamp"] {
+            if let value = metadata[key] as? NSNumber,
+               value.doubleValue > 0 {
+                return Date(timeIntervalSince1970: value.doubleValue)
+            }
+        }
+
+        guard let uploadDate = metadata["upload_date"] as? String else {
+            return nil
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd"
+        return formatter.date(from: uploadDate)
+    }
+}
+
+enum CodexSummaryInvocation {
+    static func arguments(
+        outputURL: URL,
+        model: String,
+        reasoningEffort: String
+    ) -> [String] {
+        var arguments = [
+            "exec",
+            "--ephemeral",
+            "--ignore-rules",
+            "--color", "never"
+        ]
+        if CodexModelOption(rawValue: model) != nil {
+            arguments.append("--ignore-user-config")
+        }
+        arguments += [
+            "--output-last-message", outputURL.path,
+            "--skip-git-repo-check",
+            "-m", model,
+            "-c", "model_reasoning_effort=\"\(reasoningEffort)\"",
+            "-c", "text.verbosity=\"low\""
+        ]
+        return arguments
+    }
+}
+
+private struct VideoMetadata {
+    let values: [String: Any]
+    let fileURL: URL
+}
+
 final class AnalysisPipeline: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (String) -> Void
 
@@ -125,11 +224,18 @@ final class AnalysisPipeline: @unchecked Sendable {
         }
 
         progress(L10n.string("progress.metadata", fallback: "Reading video information…"))
-        let metadata = try fetchMetadata(url: url, uvx: uvx)
-        let title = metadata["title"] as? String ?? url.absoluteString
+        let metadata = try fetchMetadata(
+            url: url,
+            uvx: uvx,
+            workDirectory: workDirectory
+        )
+        let title = metadata.values["title"] as? String ?? url.absoluteString
+        let publishedAt = VideoPublicationDate.parse(from: metadata.values)
+        let thumbnailURL = (metadata.values["thumbnail"] as? String)
+            .flatMap(URL.init(string:))
 
         progress(L10n.string("progress.captions", fallback: "Looking for captions…"))
-        let captionChoice = chooseCaption(from: metadata)
+        let captionChoice = chooseCaption(from: metadata.values)
 
         let transcript: String
         let transcriptSource: AnalysisRecord.TranscriptSource
@@ -137,6 +243,7 @@ final class AnalysisPipeline: @unchecked Sendable {
            let captionText = try? downloadCaption(
                 choice: captionChoice,
                 url: url,
+                metadataURL: metadata.fileURL,
                 uvx: uvx,
                 workDirectory: workDirectory
            ),
@@ -151,6 +258,7 @@ final class AnalysisPipeline: @unchecked Sendable {
             ))
             let audioURL = try downloadAudio(
                 url: url,
+                metadataURL: metadata.fileURL,
                 uvx: uvx,
                 workDirectory: workDirectory
             )
@@ -195,13 +303,19 @@ final class AnalysisPipeline: @unchecked Sendable {
         progress(L10n.string("progress.complete", fallback: "Analysis complete"))
         return AnalysisOutput(
             title: title,
+            publishedAt: publishedAt,
+            thumbnailURL: thumbnailURL,
             transcript: transcript,
             transcriptSource: transcriptSource,
             analysis: analysis
         )
     }
 
-    private func fetchMetadata(url: URL, uvx: String) throws -> [String: Any] {
+    private func fetchMetadata(
+        url: URL,
+        uvx: String,
+        workDirectory: URL
+    ) throws -> VideoMetadata {
         let result = try runYTDLP(
             uvx: uvx,
             arguments: [
@@ -214,11 +328,13 @@ final class AnalysisPipeline: @unchecked Sendable {
         guard
             result.succeeded,
             let data = result.standardOutput.data(using: .utf8),
-            let metadata = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let values = try JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
             throw PipelineError.invalidMetadata
         }
-        return metadata
+        let fileURL = workDirectory.appendingPathComponent("metadata.json")
+        try data.write(to: fileURL, options: .atomic)
+        return VideoMetadata(values: values, fileURL: fileURL)
     }
 
     private struct CaptionChoice {
@@ -255,6 +371,7 @@ final class AnalysisPipeline: @unchecked Sendable {
     private func downloadCaption(
         choice: CaptionChoice,
         url: URL,
+        metadataURL: URL,
         uvx: String,
         workDirectory: URL
     ) throws -> String {
@@ -266,9 +383,14 @@ final class AnalysisPipeline: @unchecked Sendable {
             "--output", "\(baseURL.path).%(ext)s"
         ]
         arguments.append(choice.isAutomatic ? "--write-auto-subs" : "--write-subs")
-        arguments.append(url.absoluteString)
+        arguments += ["--load-info-json", metadataURL.path]
 
-        let result = try runYTDLP(uvx: uvx, arguments: arguments)
+        var result = try runYTDLP(uvx: uvx, arguments: arguments)
+        if !result.succeeded {
+            arguments.removeLast(2)
+            arguments.append(url.absoluteString)
+            result = try runYTDLP(uvx: uvx, arguments: arguments)
+        }
         guard result.succeeded else {
             throw PipelineError.commandFailed(
                 L10n.string("command.captionDownload", fallback: "Caption download"),
@@ -288,20 +410,38 @@ final class AnalysisPipeline: @unchecked Sendable {
 
     private func downloadAudio(
         url: URL,
+        metadataURL: URL,
         uvx: String,
         workDirectory: URL
     ) throws -> URL {
         let template = workDirectory
             .appendingPathComponent("source.%(ext)s")
             .path
-        let result = try runYTDLP(
-            uvx: uvx,
-            arguments: [
-                "-f", "bestaudio/best",
-                "--output", template,
-                url.absoluteString
-            ]
+        let attempts = YTDLPRecovery.audioDownloadAttempts(
+            template: template,
+            videoURL: url.absoluteString,
+            metadataPath: metadataURL.path
         )
+        var result: ProcessResult?
+        for (index, attempt) in attempts.enumerated() {
+            let currentResult = try runYTDLP(
+                uvx: uvx,
+                arguments: attempt.arguments,
+                refreshPackage: attempt.refreshPackage
+            )
+            result = currentResult
+            if currentResult.succeeded {
+                break
+            }
+            let hasAnotherAttempt = index < attempts.count - 1
+            if !hasAnotherAttempt
+                || !YTDLPRecovery.shouldRetryAfterForbidden(currentResult) {
+                break
+            }
+        }
+        guard let result else {
+            throw PipelineError.noAudioDownloaded
+        }
         guard result.succeeded else {
             throw PipelineError.commandFailed(
                 L10n.string("command.audioDownload", fallback: "Audio download"),
@@ -414,14 +554,11 @@ final class AnalysisPipeline: @unchecked Sendable {
 
         let result = try runner.run(
             executable: codex,
-            arguments: [
-                "exec",
-                "--output-last-message", summaryURL.path,
-                "--skip-git-repo-check",
-                "-m", model,
-                "-c", "model_reasoning_effort=\"\(reasoningEffort)\"",
-                "-c", "text.verbosity=\"low\""
-            ],
+            arguments: CodexSummaryInvocation.arguments(
+                outputURL: summaryURL,
+                model: model,
+                reasoningEffort: reasoningEffort
+            ),
             input: prompt,
             currentDirectory: workDirectory
         )
@@ -442,9 +579,14 @@ final class AnalysisPipeline: @unchecked Sendable {
 
     private func runYTDLP(
         uvx: String,
-        arguments: [String]
+        arguments: [String],
+        refreshPackage: Bool = false
     ) throws -> ProcessResult {
-        var allArguments = ["--from", "yt-dlp", "yt-dlp"]
+        var allArguments: [String] = []
+        if refreshPackage {
+            allArguments += ["--refresh-package", "yt-dlp"]
+        }
+        allArguments += ["--from", "yt-dlp", "yt-dlp"]
         if let node = CommandLocator.locate("node") {
             allArguments += ["--js-runtimes", "node:\(node)"]
         }

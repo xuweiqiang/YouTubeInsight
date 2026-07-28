@@ -15,6 +15,12 @@ final class YouTubeInsightTests: XCTestCase {
             )?.absoluteString,
             "https://www.youtube.com/watch?v=XYgm-dNNrR8"
         )
+        XCTAssertEqual(
+            YouTubeURLParser.thumbnailURL(
+                from: "https://youtu.be/XYgm-dNNrR8"
+            )?.absoluteString,
+            "https://i.ytimg.com/vi/XYgm-dNNrR8/hqdefault.jpg"
+        )
     }
 
     func testRejectsNonYouTubeAndInvalidVideoIDs() {
@@ -52,9 +58,13 @@ final class YouTubeInsightTests: XCTestCase {
         }
 
         let store = HistoryStore(fileURL: directory.appendingPathComponent("history.json"))
+        let thumbnailURL = URL(
+            string: "https://i.ytimg.com/vi/XYgm-dNNrR8/maxresdefault.jpg"
+        )!
         let record = AnalysisRecord(
             url: "https://www.youtube.com/watch?v=XYgm-dNNrR8",
             title: "测试视频",
+            thumbnailURL: thumbnailURL,
             transcriptSource: .localWhisper,
             transcript: "转写",
             analysis: "分析"
@@ -62,6 +72,7 @@ final class YouTubeInsightTests: XCTestCase {
         try store.save([record])
 
         XCTAssertEqual(store.load(), [record])
+        XCTAssertEqual(store.load().first?.thumbnailURL, thumbnailURL)
     }
 
     func testReadsPlainTextWhisperTranscript() throws {
@@ -208,5 +219,69 @@ final class YouTubeInsightTests: XCTestCase {
         XCTAssertEqual(videos.count, 1)
         XCTAssertEqual(videos[0].videoID, "XYgm-dNNrR8")
         XCTAssertEqual(videos[0].channelTitle, "Example channel")
+    }
+
+    func testClassifiesOnlyUnavailableUploadPlaylistsAsSkippable() {
+        let data = """
+        {
+          "error": {
+            "code": 404,
+            "message": "The playlist cannot be found.",
+            "errors": [{
+              "message": "The playlist cannot be found.",
+              "reason": "playlistNotFound"
+            }]
+          }
+        }
+        """.data(using: .utf8)!
+        let details = YouTubeAPIParser.errorDetails(from: data)
+
+        XCTAssertEqual(details.reason, "playlistNotFound")
+        XCTAssertTrue(
+            YouTubeAPIError.requestFailed(
+                404,
+                reason: details.reason,
+                details: details.message
+            ).isUnavailableUploadPlaylist
+        )
+        XCTAssertFalse(
+            YouTubeAPIError.requestFailed(
+                403,
+                reason: "quotaExceeded",
+                details: "Quota exceeded"
+            ).isUnavailableUploadPlaylist
+        )
+    }
+
+    func testRecentVideoQueueOrdersNewestFirstAndDeduplicates() {
+        let base = Date(timeIntervalSince1970: 1_700_000_000)
+        let videos = [
+            YouTubeRecentVideo(
+                videoID: "oldest",
+                title: "Oldest",
+                channelTitle: "Channel",
+                publishedAt: base
+            ),
+            YouTubeRecentVideo(
+                videoID: "newest",
+                title: "Newest",
+                channelTitle: "Channel",
+                publishedAt: base.addingTimeInterval(200)
+            ),
+            YouTubeRecentVideo(
+                videoID: "middle",
+                title: "Middle",
+                channelTitle: "Channel",
+                publishedAt: base.addingTimeInterval(100)
+            )
+        ]
+        var queue = YouTubeRecentVideoQueue()
+        queue.enqueue(contentsOf: videos + [videos[1]])
+
+        XCTAssertEqual(queue.count, 3)
+        XCTAssertEqual(queue.dequeue()?.videoID, "newest")
+        XCTAssertEqual(queue.dequeue()?.videoID, "middle")
+        XCTAssertEqual(queue.dequeue()?.videoID, "oldest")
+        XCTAssertTrue(queue.isEmpty)
     }
 }

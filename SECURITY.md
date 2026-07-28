@@ -37,6 +37,10 @@ audio is removed after a completed or failed task. Package and Whisper model
 caches are managed by `uv` and Hugging Face and are not removed when a history
 record is deleted.
 
+History records may include the public YouTube thumbnail URL returned with the
+video metadata. Existing records without that field derive the standard public
+thumbnail URL from the saved YouTube video ID when displayed.
+
 ## Reporting a vulnerability
 
 Do not open a public GitHub issue containing credentials, private video URLs,

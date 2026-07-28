@@ -25,15 +25,23 @@ struct AnalysisRecord: Identifiable, Codable, Hashable {
     let url: String
     let title: String
     let analyzedAt: Date
+    let publishedAt: Date?
+    let thumbnailURL: URL?
     let transcriptSource: TranscriptSource
     let transcript: String
     let analysis: String
+
+    var displayThumbnailURL: URL? {
+        thumbnailURL ?? YouTubeURLParser.thumbnailURL(from: url)
+    }
 
     init(
         id: UUID = UUID(),
         url: String,
         title: String,
         analyzedAt: Date = Date(),
+        publishedAt: Date? = nil,
+        thumbnailURL: URL? = nil,
         transcriptSource: TranscriptSource,
         transcript: String,
         analysis: String
@@ -42,6 +50,8 @@ struct AnalysisRecord: Identifiable, Codable, Hashable {
         self.url = url
         self.title = title
         self.analyzedAt = analyzedAt
+        self.publishedAt = publishedAt
+        self.thumbnailURL = thumbnailURL
         self.transcriptSource = transcriptSource
         self.transcript = transcript
         self.analysis = analysis
@@ -50,6 +60,8 @@ struct AnalysisRecord: Identifiable, Codable, Hashable {
 
 struct AnalysisOutput {
     let title: String
+    let publishedAt: Date?
+    let thumbnailURL: URL?
     let transcript: String
     let transcriptSource: AnalysisRecord.TranscriptSource
     let analysis: String
@@ -166,6 +178,19 @@ enum CodexReasoningEffort: String, CaseIterable, Identifiable {
         case .ultra:
             return L10n.string("settings.effort.ultra", fallback: "Ultra")
         }
+    }
+}
+
+enum HistoryListScrollPolicy {
+    static func target(
+        previousCount: Int,
+        currentCount: Int,
+        firstRecordID: UUID?
+    ) -> UUID? {
+        guard currentCount > previousCount else {
+            return nil
+        }
+        return firstRecordID
     }
 }
 
