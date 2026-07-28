@@ -4,6 +4,25 @@
 
 [English](README.en.md) · 简体中文
 
+## 界面预览
+
+![YouTubeInsight 主界面：视频封面、分析历史与结构化结果](docs/media/YouTubeInsight-overview.png)
+
+截图使用公开演示数据，不包含真实 YouTube 账号或个人分析历史。
+
+## 30 秒使用演示
+
+[![YouTubeInsight 30 秒快速上手演示](docs/media/YouTubeInsight-quickstart.gif)](docs/media/YouTubeInsight-quickstart.mp4)
+
+点击上方动图可打开高清 MP4 视频。基本使用方法：
+
+1. **手动分析**：把 YouTube、Shorts 或 `youtu.be` 链接粘贴到顶部输入框，
+   点击“开始分析”，完成后结果会自动保存到左侧历史记录。
+2. **自动分析**：在设置中导入 Google OAuth 桌面应用 JSON 并绑定账号，
+   客户端会检查最近24小时的订阅更新，并在运行期间每15分钟刷新。
+3. **查看结果**：在左侧点击视频封面或标题，查看短总览和5条要点；顶部按钮
+   可以打开原视频或复制分析内容。
+
 ## 功能
 
 - 通过 Google OAuth 在系统浏览器中绑定 YouTube 账号，仅申请只读权限。
