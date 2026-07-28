@@ -22,7 +22,7 @@ Choose the animated preview above to open the high-quality MP4. Basic usage:
    field and choose **Analyze**. The completed result is saved to history.
 2. **Automatic analysis:** import a Google OAuth Desktop app JSON in Settings
    and bind the account. The app checks subscription uploads from the previous
-   24 hours and refreshes every 15 minutes while running.
+   24 hours, then schedules later scans according to the subscription count.
 3. **Read and reuse:** choose a thumbnail or title in the sidebar to read the
    short overview and five takeaways, open the original video, or copy the
    analysis.
@@ -31,7 +31,8 @@ Choose the animated preview above to open the high-quality MP4. Basic usage:
 
 - Binds a YouTube account in the system browser with read-only Google OAuth.
 - Reads every subscribed channel and discovers videos published in the last 24 hours.
-- Refreshes every 15 minutes while the app is running, with an on-demand refresh button.
+- Refreshes as often as every 15 minutes while running, automatically extending
+  the interval for larger subscription lists to protect YouTube API quota.
 - Checks up to six subscribed channels concurrently. Discovery continues while one analysis runs, and newly found videos enter a newest-first priority queue with saved or already-attempted videos deduplicated.
 - Still accepts individual YouTube, Shorts, and `youtu.be` links for manual
   analysis without requiring account binding.
@@ -110,9 +111,11 @@ codex login
 
 The app uses PKCE with a loopback redirect. Access and refresh tokens are stored
 in macOS Keychain and are revoked and deleted when the account is disconnected.
-It immediately checks the previous 24 hours, then refreshes every 15 minutes
-while running. Channel discovery is concurrent; each discovered batch enters a
-newest-first queue while the single analysis worker starts immediately.
+It immediately checks the previous 24 hours, then refreshes automatically while
+running. The minimum interval is 15 minutes and increases with the subscription
+count to protect API quota. Channel discovery is concurrent; each discovered
+batch enters a newest-first queue while the single analysis worker starts
+immediately.
 
 ### Recommended installation and Keychain access
 
@@ -155,7 +158,7 @@ installed copy.
 
 `CFBundleShortVersionString` in `Resources/Info.plist` controls the release
 version. The build script derives `CFBundleVersion` from the latest source or
-resource modification time, for example `1.6.4 (Build 20260728103000)`.
+resource modification time, for example `1.6.7 (Build 20260728103000)`.
 Unchanged content keeps the same build number. Set
 `YOUTUBEINSIGHT_BUILD_NUMBER` to override it.
 
@@ -183,10 +186,24 @@ that skips plugin, rule, and user-configuration startup work. Local Whisper
 remains the dominant cost for captionless videos; choose the `small` or `tiny`
 model in Settings when speed matters more than maximum transcription quality.
 
+Starting with 1.6.5, video metadata extraction automatically retries temporary
+network or extractor failures. If recovery fails, the app shows the specific
+`yt-dlp` reason so public-video restrictions, sign-in checks, and network
+failures can be distinguished.
+
+Starting with 1.6.6, upcoming live events are deferred instead of counted as
+failures, then retried by a scheduled scan after the stream begins.
+
 Each scan pages through all subscriptions and reads channel upload playlists
 with the low-cost `subscriptions.list`, `channels.list`, and
 `playlistItems.list` endpoints. The app does not run after it is closed; the
 next launch checks the previous 24 hours again.
+
+Starting with 1.6.7, the scan interval is derived from the subscription count
+and an estimated daily request budget. When YouTube returns `quotaExceeded`,
+the app stops the current scan and suppresses further API requests until the
+quota resets at midnight Pacific Time. Manual URL analysis uses `yt-dlp` and
+does not consume YouTube Data API quota.
 
 Whisper output is read as plain text so non-standard numeric values in model
 JSON metadata cannot invalidate an otherwise successful transcript.
@@ -226,6 +243,9 @@ See [SECURITY.md](SECURITY.md) for the trust model and reporting instructions.
   YouTube Data API v3 is enabled, and the Google account is listed as a test
   user while the OAuth consent screen is in testing. Public distribution may
   require Google OAuth verification.
+- **YouTube API quota is exhausted:** this affects automatic subscription
+  discovery only. The app resumes after the midnight Pacific Time reset, and
+  manual URL analysis remains available.
 - **First transcription is slow:** wait for the selected Whisper model to finish
   downloading.
 - **macOS cannot verify the developer:** locally built packages are ad-hoc signed
