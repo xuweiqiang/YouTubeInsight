@@ -10,7 +10,7 @@ new video from the last 24 hours, and keeps a local, searchable history.
 - Binds a YouTube account in the system browser with read-only Google OAuth.
 - Reads every subscribed channel and discovers videos published in the last 24 hours.
 - Refreshes every 15 minutes while the app is running, with an on-demand refresh button.
-- Queues new videos in publication order and deduplicates saved or already-attempted videos.
+- Checks up to six subscribed channels concurrently. Discovery continues while one analysis runs, and newly found videos enter a newest-first priority queue with saved or already-attempted videos deduplicated.
 - Still accepts individual YouTube, Shorts, and `youtu.be` links for manual
   analysis without requiring account binding.
 - Checks the runtime at launch, automatically repairs missing or broken tools
@@ -22,7 +22,8 @@ new video from the last 24 hours, and keeps a local, searchable history.
   High, Extra High, Max, or Ultra reasoning effort. Every automatic analysis
   uses the current selection.
 - Uses plain language, short labels, and arrow flows; results are normally 250–350 characters and never exceed 400.
-- Saves the URL, title, date, transcript source, transcript, and analysis locally.
+- Saves the URL, title, thumbnail URL, date, transcript source, transcript, and
+  analysis locally, with thumbnails shown in history and detail views.
 - Shows the app version and build number in the sidebar. Rebuilding after a
   source or resource update automatically generates a new build number.
 - Opens the main window maximized to the current screen's usable area without
@@ -88,7 +89,30 @@ codex login
 The app uses PKCE with a loopback redirect. Access and refresh tokens are stored
 in macOS Keychain and are revoked and deleted when the account is disconnected.
 It immediately checks the previous 24 hours, then refreshes every 15 minutes
-while running.
+while running. Channel discovery is concurrent; each discovered batch enters a
+newest-first queue while the single analysis worker starts immediately.
+
+### Recommended installation and Keychain access
+
+Keep `YouTubeInsight.app` in `/Applications` and always launch that installed
+copy. Do not alternate between copies in a DMG, Downloads, or the source
+`dist` directory. macOS may treat them as different applications and request
+Keychain access repeatedly.
+
+If prompts continue after choosing **Always Allow**:
+
+1. Quit YouTubeInsight.
+2. Open **Keychain Access**, then select **login → Passwords**.
+3. Search for and open `com.local.YouTubeInsight.YouTubeOAuth`.
+4. Under **Access Control**, choose `+`, add
+   `/Applications/YouTubeInsight.app`, and save.
+
+Local release packages are ad-hoc signed, so rebuilding or upgrading changes
+the code identity and the new version may require one more confirmation.
+**Allow all applications to access this item** suppresses confirmation but
+also lets other local applications read the YouTube token, so it is not
+recommended. A stable Apple Developer signature preserves the app identity
+across upgrades.
 
 For a one-off video, skip account binding and paste the URL into the
 **Manual analysis** field in the main window. Manual and scheduled jobs share
@@ -101,12 +125,15 @@ history.
 chmod +x scripts/build-app.sh scripts/run-tests.sh
 ./scripts/run-tests.sh
 ./scripts/build-app.sh
-open dist/YouTubeInsight.app
+open dist
 ```
+
+After building, drag `YouTubeInsight.app` into Applications and launch the
+installed copy.
 
 `CFBundleShortVersionString` in `Resources/Info.plist` controls the release
 version. The build script derives `CFBundleVersion` from the latest source or
-resource modification time, for example `1.5.3 (Build 20260727103000)`.
+resource modification time, for example `1.6.4 (Build 20260728103000)`.
 Unchanged content keeps the same build number. Set
 `YOUTUBEINSIGHT_BUILD_NUMBER` to override it.
 
@@ -125,6 +152,14 @@ Check only the startup environment:
 
 The first captionless video downloads the selected Whisper model. Subsequent
 runs reuse the model cache.
+
+Starting with 1.6.3, caption and audio downloads reuse the video metadata
+already fetched at the beginning of a run, avoiding repeated YouTube page
+extraction. Captionless videos prefer a lower-bitrate audio stream suitable
+for speech recognition. Built-in Codex models use a lean, ephemeral invocation
+that skips plugin, rule, and user-configuration startup work. Local Whisper
+remains the dominant cost for captionless videos; choose the `small` or `tiny`
+model in Settings when speed matters more than maximum transcription quality.
 
 Each scan pages through all subscriptions and reads channel upload playlists
 with the low-cost `subscriptions.list`, `channels.list`, and

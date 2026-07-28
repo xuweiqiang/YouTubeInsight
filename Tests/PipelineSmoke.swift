@@ -24,12 +24,24 @@ struct PipelineSmoke {
         }
 
         do {
+            let startedAt = ProcessInfo.processInfo.systemUptime
+            let currentSettings = PipelineSettings.current
+            let settings = PipelineSettings(
+                codexModel: currentSettings.codexModel,
+                codexReasoningEffort: currentSettings.codexReasoningEffort,
+                whisperModel: ProcessInfo.processInfo.environment[
+                    "YOUTUBEINSIGHT_SMOKE_WHISPER_MODEL"
+                ]?.nilIfBlank ?? currentSettings.whisperModel
+            )
             let output = try await AnalysisPipeline().analyze(
                 url: url,
-                settings: .current
+                settings: settings
             ) { message in
-                print("[progress] \(message)")
+                let elapsed = ProcessInfo.processInfo.systemUptime - startedAt
+                print(String(format: "[progress +%.3fs] %@", elapsed, message))
             }
+            let total = ProcessInfo.processInfo.systemUptime - startedAt
+            print(String(format: "[total] %.3fs", total))
             print("[title] \(output.title)")
             print("[source] \(output.transcriptSource.rawValue)")
             print("[transcript characters] \(output.transcript.count)")

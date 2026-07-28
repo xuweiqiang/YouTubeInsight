@@ -37,6 +37,9 @@ final class AppModel: ObservableObject {
     private let youtubeService: YouTubeSubscriptionService
     private var subscriptionMonitorTask: Task<Void, Never>?
     private var attemptedVideoIDs = Set<String>()
+    private var automaticVideoQueue = YouTubeRecentVideoQueue()
+    private var automaticDiscoveryFinished = true
+    private var automaticDiscoveredCount = 0
     private let monitorInterval: UInt64 = 15 * 60 * 1_000_000_000
 
     init(
@@ -293,49 +296,44 @@ final class AppModel: ObservableObject {
             isRefreshingSubscriptions = false
             pendingAutomaticAnalyses = 0
             isAnalyzing = false
+            automaticVideoQueue.removeAll()
+            automaticDiscoveryFinished = true
         }
 
         do {
             let cutoff = Date().addingTimeInterval(-24 * 60 * 60)
-            let videos = try await youtubeService.recentUploads(
+            automaticVideoQueue.removeAll()
+            automaticDiscoveryFinished = false
+            automaticDiscoveredCount = 0
+
+            async let discovery: Void = discoverAutomaticVideos(
                 configuration: configuration,
-                since: cutoff
-            ) { [self] message in
-                DispatchQueue.main.async { [self] in
-                    statusMessage = message
-                }
-            }
-            let savedURLs = Set(records.map(\.url))
-            let unseen = videos.filter {
-                !savedURLs.contains($0.url.absoluteString)
-                    && !attemptedVideoIDs.contains($0.videoID)
-            }
-            attemptedVideoIDs.formUnion(unseen.map(\.videoID))
+                cutoff: cutoff
+            )
 
-            guard !unseen.isEmpty else {
-                completeSubscriptionRefresh(
-                    status: L10n.string(
-                        "youtube.status.noNewVideos",
-                        fallback: "No new subscription videos in the last 24 hours"
-                    )
-                )
-                return
-            }
-
-            pendingAutomaticAnalyses = unseen.count
             var succeeded = 0
             var failed = 0
-            for (index, video) in unseen.enumerated() {
+            while !automaticDiscoveryFinished || !automaticVideoQueue.isEmpty {
                 guard !Task.isCancelled else {
                     return
                 }
-                pendingAutomaticAnalyses = unseen.count - index
+
+                guard let video = automaticVideoQueue.dequeue() else {
+                    do {
+                        try await Task.sleep(nanoseconds: 100_000_000)
+                    } catch {
+                        return
+                    }
+                    continue
+                }
+
                 isAnalyzing = true
+                pendingAutomaticAnalyses = automaticVideoQueue.count + 1
                 statusMessage = L10n.format(
                     "youtube.status.analyzingVideo",
                     fallback: "Analyzing %d/%d: %@",
-                    index + 1,
-                    unseen.count,
+                    succeeded + failed + 1,
+                    automaticDiscoveredCount,
                     video.title
                 )
                 do {
@@ -346,7 +344,21 @@ final class AppModel: ObservableObject {
                     errorMessage = (error as? LocalizedError)?.errorDescription
                         ?? error.localizedDescription
                 }
+                isAnalyzing = false
+                pendingAutomaticAnalyses = automaticVideoQueue.count
             }
+            try await discovery
+
+            guard succeeded + failed > 0 else {
+                completeSubscriptionRefresh(
+                    status: L10n.string(
+                        "youtube.status.noNewVideos",
+                        fallback: "No new subscription videos in the last 24 hours"
+                    )
+                )
+                return
+            }
+
             let status = failed == 0
                 ? L10n.format(
                     "youtube.status.refreshComplete",
@@ -378,6 +390,45 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func discoverAutomaticVideos(
+        configuration: YouTubeOAuthConfiguration,
+        cutoff: Date
+    ) async throws {
+        defer {
+            automaticDiscoveryFinished = true
+        }
+        try await youtubeService.discoverRecentUploads(
+            configuration: configuration,
+            since: cutoff
+        ) { [weak self] message in
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !isAnalyzing else {
+                    return
+                }
+                statusMessage = message
+            }
+        } discovered: { [weak self] videos in
+            await self?.enqueueAutomaticVideos(videos)
+        }
+    }
+
+    private func enqueueAutomaticVideos(_ videos: [YouTubeRecentVideo]) {
+        let savedURLs = Set(records.map(\.url))
+        let unseen = videos.filter {
+            !savedURLs.contains($0.url.absoluteString)
+                && !attemptedVideoIDs.contains($0.videoID)
+        }
+        guard !unseen.isEmpty else {
+            return
+        }
+
+        attemptedVideoIDs.formUnion(unseen.map(\.videoID))
+        automaticVideoQueue.enqueue(contentsOf: unseen)
+        automaticDiscoveredCount += unseen.count
+        pendingAutomaticAnalyses = automaticVideoQueue.count
+            + (isAnalyzing ? 1 : 0)
+    }
+
     private func analyzeAutomatically(_ video: YouTubeRecentVideo) async throws {
         try await analyzeAndSave(url: video.url)
     }
@@ -394,6 +445,8 @@ final class AppModel: ObservableObject {
         let record = AnalysisRecord(
             url: url.absoluteString,
             title: output.title,
+            publishedAt: output.publishedAt,
+            thumbnailURL: output.thumbnailURL,
             transcriptSource: output.transcriptSource,
             transcript: output.transcript,
             analysis: output.analysis

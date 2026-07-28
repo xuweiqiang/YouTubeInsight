@@ -35,6 +35,7 @@
 "guidance.installUV" = "请先执行：brew install uv";
 "history.emptyDescription" = "完成的分析会自动保存在这里";
 "history.emptyTitle" = "还没有分析记录";
+"history.publishedAt" = "发布于 %@";
 "history.title" = "分析历史";
 "input.placeholder" = "粘贴 YouTube 链接，例如 https://www.youtube.com/watch?v=…";
 "progress.analyzing" = "正在用 Codex 归纳和分析…";

@@ -35,6 +35,7 @@
 "guidance.installUV" = "実行してください：brew install uv";
 "history.emptyDescription" = "完了した分析はここに自動保存されます";
 "history.emptyTitle" = "分析履歴はまだありません";
+"history.publishedAt" = "公開 %@";
 "history.title" = "分析履歴";
 "input.placeholder" = "YouTube URLを貼り付けます（例：https://www.youtube.com/watch?v=…）";
 "progress.analyzing" = "Codexで要約・分析しています…";

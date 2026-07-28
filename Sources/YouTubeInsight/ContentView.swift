@@ -5,6 +5,7 @@ import UniformTypeIdentifiers
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @FocusState private var isURLFieldFocused: Bool
+    @State private var renderedHistoryCount = 0
 
     var body: some View {
         ZStack {
@@ -78,28 +79,50 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
             } else {
-                List(selection: $model.selectedRecordID) {
-                    ForEach(model.records) { record in
-                        HistoryRow(record: record)
-                            .tag(record.id)
-                            .contextMenu {
-                                Button(L10n.string("action.copyAnalysis", fallback: "Copy analysis")) {
-                                    model.copyAnalysis(record)
+                ScrollViewReader { proxy in
+                    List(selection: $model.selectedRecordID) {
+                        ForEach(model.records) { record in
+                            HistoryRow(record: record)
+                                .id(record.id)
+                                .tag(record.id)
+                                .contextMenu {
+                                    Button(L10n.string("action.copyAnalysis", fallback: "Copy analysis")) {
+                                        model.copyAnalysis(record)
+                                    }
+                                    Button(L10n.string("action.openOriginal", fallback: "Open original video")) {
+                                        model.openVideo(record)
+                                    }
+                                    Divider()
+                                    Button(
+                                        L10n.string("action.delete", fallback: "Delete"),
+                                        role: .destructive
+                                    ) {
+                                        model.delete(record)
+                                    }
                                 }
-                                Button(L10n.string("action.openOriginal", fallback: "Open original video")) {
-                                    model.openVideo(record)
-                                }
-                                Divider()
-                                Button(
-                                    L10n.string("action.delete", fallback: "Delete"),
-                                    role: .destructive
-                                ) {
-                                    model.delete(record)
-                                }
+                        }
+                    }
+                    .listStyle(.sidebar)
+                    .onAppear {
+                        renderedHistoryCount = model.records.count
+                    }
+                    .onChange(of: model.records.count) { newCount in
+                        let target = HistoryListScrollPolicy.target(
+                            previousCount: renderedHistoryCount,
+                            currentCount: newCount,
+                            firstRecordID: model.records.first?.id
+                        )
+                        renderedHistoryCount = newCount
+                        guard let target else {
+                            return
+                        }
+                        DispatchQueue.main.async {
+                            withAnimation {
+                                proxy.scrollTo(target, anchor: .top)
                             }
+                        }
                     }
                 }
-                .listStyle(.sidebar)
             }
 
             Divider()
@@ -446,22 +469,97 @@ private struct EnvironmentPreparationView: View {
     }
 }
 
+private struct VideoThumbnail: View {
+    let url: URL?
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        Group {
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case let .success(image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .empty:
+                        placeholder
+                            .overlay {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                    case .failure:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(.quaternary, lineWidth: 1)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color.secondary.opacity(0.12)
+            Image(systemName: "play.rectangle")
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
 private struct HistoryRow: View {
     let record: AnalysisRecord
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(record.title)
-                .font(.body.weight(.medium))
-                .lineLimit(2)
+        HStack(alignment: .top, spacing: 10) {
+            VideoThumbnail(
+                url: record.displayThumbnailURL,
+                width: 88,
+                height: 50,
+                cornerRadius: 6
+            )
 
-            HStack(spacing: 6) {
-                Text(record.analyzedAt, format: .dateTime.month().day().hour().minute())
-                Text("·")
-                Text(record.transcriptSource.localizedName)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(record.title)
+                    .font(.body.weight(.medium))
+                    .lineLimit(2)
+
+                if let publishedAt = record.publishedAt {
+                    Label(
+                        L10n.format(
+                            "history.publishedAt",
+                            fallback: "Published %@",
+                            DateFormatter.localizedString(
+                                from: publishedAt,
+                                dateStyle: .medium,
+                                timeStyle: .short
+                            )
+                        ),
+                        systemImage: "calendar"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+
+                HStack(spacing: 6) {
+                    Text(record.analyzedAt, format: .dateTime.month().day().hour().minute())
+                    Text("·")
+                    Text(record.transcriptSource.localizedName)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 5)
     }
@@ -488,6 +586,13 @@ private struct AnalysisDetail: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 12) {
+                VideoThumbnail(
+                    url: record.displayThumbnailURL,
+                    width: 168,
+                    height: 95,
+                    cornerRadius: 9
+                )
+
                 VStack(alignment: .leading, spacing: 5) {
                     Text(record.title)
                         .font(.title2.weight(.semibold))
@@ -498,6 +603,22 @@ private struct AnalysisDetail: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if let publishedAt = record.publishedAt {
+                        Label(
+                            L10n.format(
+                                "history.publishedAt",
+                                fallback: "Published %@",
+                                DateFormatter.localizedString(
+                                    from: publishedAt,
+                                    dateStyle: .long,
+                                    timeStyle: .short
+                                )
+                            ),
+                            systemImage: "calendar"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Button(action: openAction) {

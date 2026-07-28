@@ -1,6 +1,6 @@
 import Foundation
 
-struct YouTubeRecentVideo: Equatable, Hashable {
+struct YouTubeRecentVideo: Equatable, Hashable, Sendable {
     let videoID: String
     let title: String
     let channelTitle: String
@@ -11,9 +11,58 @@ struct YouTubeRecentVideo: Equatable, Hashable {
     }
 }
 
+struct YouTubeRecentVideoQueue {
+    private var videos: [YouTubeRecentVideo] = []
+    private var videoIDs = Set<String>()
+
+    var count: Int {
+        videos.count
+    }
+
+    var isEmpty: Bool {
+        videos.isEmpty
+    }
+
+    mutating func enqueue(contentsOf additions: [YouTubeRecentVideo]) {
+        for video in additions where videoIDs.insert(video.videoID).inserted {
+            videos.append(video)
+        }
+        videos.sort {
+            if $0.publishedAt == $1.publishedAt {
+                return $0.videoID < $1.videoID
+            }
+            return $0.publishedAt > $1.publishedAt
+        }
+    }
+
+    mutating func dequeue() -> YouTubeRecentVideo? {
+        guard !videos.isEmpty else {
+            return nil
+        }
+        let video = videos.removeFirst()
+        videoIDs.remove(video.videoID)
+        return video
+    }
+
+    mutating func removeAll() {
+        videos.removeAll(keepingCapacity: true)
+        videoIDs.removeAll(keepingCapacity: true)
+    }
+}
+
 enum YouTubeAPIError: LocalizedError {
     case invalidResponse
-    case requestFailed(Int, String)
+    case requestFailed(Int, reason: String?, details: String)
+
+    var isUnavailableUploadPlaylist: Bool {
+        switch self {
+        case let .requestFailed(status, reason, _):
+            return status == 404
+                || (status == 403 && reason == "playlistItemsNotAccessible")
+        case .invalidResponse:
+            return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -22,7 +71,7 @@ enum YouTubeAPIError: LocalizedError {
                 "youtube.error.invalidResponse",
                 fallback: "YouTube returned an unreadable response."
             )
-        case let .requestFailed(status, details):
+        case let .requestFailed(status, _, details):
             return L10n.format(
                 "youtube.error.api",
                 fallback: "YouTube API request failed (%d): %@",
@@ -35,10 +84,12 @@ enum YouTubeAPIError: LocalizedError {
 
 final class YouTubeSubscriptionService: @unchecked Sendable {
     typealias ProgressHandler = @Sendable (String) -> Void
+    typealias DiscoveryHandler = @Sendable ([YouTubeRecentVideo]) async -> Void
 
     private let oauthManager: YouTubeOAuthManager
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let maximumConcurrentChannelRequests = 6
 
     init(
         oauthManager: YouTubeOAuthManager = YouTubeOAuthManager(),
@@ -79,11 +130,12 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             ?? L10n.string("youtube.accountUnknown", fallback: "YouTube account")
     }
 
-    func recentUploads(
+    func discoverRecentUploads(
         configuration: YouTubeOAuthConfiguration,
         since cutoff: Date,
-        progress: @escaping ProgressHandler
-    ) async throws -> [YouTubeRecentVideo] {
+        progress: @escaping ProgressHandler,
+        discovered: @escaping DiscoveryHandler
+    ) async throws {
         progress(L10n.string(
             "youtube.status.fetchingSubscriptions",
             fallback: "Reading subscribed channels…"
@@ -92,7 +144,7 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             configuration: configuration
         )
         guard !subscriptions.isEmpty else {
-            return []
+            return
         }
 
         progress(L10n.format(
@@ -104,28 +156,73 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             subscriptions: subscriptions,
             configuration: configuration
         )
+        guard !channels.isEmpty else {
+            return
+        }
 
-        var videos: [YouTubeRecentVideo] = []
-        for (index, channel) in channels.enumerated() {
-            progress(L10n.format(
-                "youtube.status.scanningChannel",
-                fallback: "Checking recent uploads %d/%d: %@",
-                index + 1,
-                channels.count,
-                channel.title
-            ))
-            videos += try await fetchRecentVideos(
+        try await withThrowingTaskGroup(
+            of: ChannelScanResult.self
+        ) { group in
+            let initialCount = min(
+                maximumConcurrentChannelRequests,
+                channels.count
+            )
+            for channel in channels.prefix(initialCount) {
+                group.addTask { [self] in
+                    try await scanChannel(
+                        channel,
+                        cutoff: cutoff,
+                        configuration: configuration
+                    )
+                }
+            }
+
+            var nextIndex = initialCount
+            var completedCount = 0
+            while let result = try await group.next() {
+                completedCount += 1
+                progress(L10n.format(
+                    "youtube.status.scanningChannel",
+                    fallback: "Checking recent uploads %d/%d: %@",
+                    completedCount,
+                    channels.count,
+                    result.channel.title
+                ))
+                if !result.videos.isEmpty {
+                    await discovered(result.videos)
+                }
+
+                if nextIndex < channels.count {
+                    let channel = channels[nextIndex]
+                    nextIndex += 1
+                    group.addTask { [self] in
+                        try await scanChannel(
+                            channel,
+                            cutoff: cutoff,
+                            configuration: configuration
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func scanChannel(
+        _ channel: UploadChannel,
+        cutoff: Date,
+        configuration: YouTubeOAuthConfiguration
+    ) async throws -> ChannelScanResult {
+        do {
+            let videos = try await fetchRecentVideos(
                 channel: channel,
                 cutoff: cutoff,
                 configuration: configuration
             )
+            return ChannelScanResult(channel: channel, videos: videos)
+        } catch let error as YouTubeAPIError
+            where error.isUnavailableUploadPlaylist {
+            return ChannelScanResult(channel: channel, videos: [])
         }
-
-        var unique: [String: YouTubeRecentVideo] = [:]
-        for video in videos {
-            unique[video.videoID] = video
-        }
-        return unique.values.sorted { $0.publishedAt < $1.publishedAt }
     }
 
     private func fetchSubscriptions(
@@ -245,7 +342,12 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             }
         } while pageToken != nil
 
-        return videos
+        return videos.sorted {
+            if $0.publishedAt == $1.publishedAt {
+                return $0.videoID < $1.videoID
+            }
+            return $0.publishedAt > $1.publishedAt
+        }
     }
 
     private func request<Response: Decodable>(
@@ -282,9 +384,11 @@ final class YouTubeSubscriptionService: @unchecked Sendable {
             )
         }
         guard (200..<300).contains(http.statusCode) else {
+            let details = YouTubeAPIParser.errorDetails(from: data)
             throw YouTubeAPIError.requestFailed(
                 http.statusCode,
-                YouTubeAPIParser.errorMessage(from: data)
+                reason: details.reason,
+                details: details.message
             )
         }
         do {
@@ -300,10 +404,15 @@ private struct SubscribedChannel {
     let title: String
 }
 
-private struct UploadChannel {
+private struct UploadChannel: Sendable {
     let channelID: String
     let title: String
     let uploadsPlaylistID: String
+}
+
+private struct ChannelScanResult: Sendable {
+    let channel: UploadChannel
+    let videos: [YouTubeRecentVideo]
 }
 
 struct SubscriptionListResponse: Decodable {
@@ -406,20 +515,40 @@ enum YouTubeAPIParser {
         }
     }
 
-    static func errorMessage(from data: Data) -> String {
+    static func errorDetails(from data: Data) -> YouTubeAPIErrorDetails {
         struct ErrorEnvelope: Decodable {
             struct APIError: Decodable {
+                struct Detail: Decodable {
+                    let message: String?
+                    let reason: String?
+                }
+
                 let message: String?
+                let errors: [Detail]?
             }
 
             let error: APIError?
         }
         if let envelope = try? JSONDecoder().decode(ErrorEnvelope.self, from: data),
-           let message = envelope.error?.message?.nilIfBlank {
-            return message
+           let apiError = envelope.error {
+            return YouTubeAPIErrorDetails(
+                reason: apiError.errors?.first?.reason?.nilIfBlank,
+                message: apiError.message?.nilIfBlank
+                    ?? apiError.errors?.first?.message?.nilIfBlank
+                    ?? L10n.string(
+                        "youtube.error.unknown",
+                        fallback: "Unknown YouTube API error"
+                    )
+            )
         }
-        return String(data: data, encoding: .utf8)?.nilIfBlank
-            ?? L10n.string("youtube.error.unknown", fallback: "Unknown YouTube API error")
+        return YouTubeAPIErrorDetails(
+            reason: nil,
+            message: String(data: data, encoding: .utf8)?.nilIfBlank
+                ?? L10n.string(
+                    "youtube.error.unknown",
+                    fallback: "Unknown YouTube API error"
+                )
+        )
     }
 
     private static func parseDate(_ value: String) -> Date? {
@@ -431,4 +560,9 @@ enum YouTubeAPIParser {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: value)
     }
+}
+
+struct YouTubeAPIErrorDetails: Equatable {
+    let reason: String?
+    let message: String
 }

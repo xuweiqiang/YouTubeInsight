@@ -35,6 +35,7 @@
 "guidance.installUV" = "Exécutez : brew install uv";
 "history.emptyDescription" = "Les analyses terminées sont automatiquement enregistrées ici";
 "history.emptyTitle" = "Aucune analyse pour le moment";
+"history.publishedAt" = "Publié %@";
 "history.title" = "Historique";
 "input.placeholder" = "Collez une URL YouTube, par exemple https://www.youtube.com/watch?v=…";
 "progress.analyzing" = "Résumé et analyse avec Codex…";

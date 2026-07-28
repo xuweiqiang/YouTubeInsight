@@ -2,6 +2,20 @@ import Foundation
 
 enum YouTubeURLParser {
     static func canonicalURL(from input: String) -> URL? {
+        guard let videoID = videoID(from: input) else {
+            return nil
+        }
+        return URL(string: "https://www.youtube.com/watch?v=\(videoID)")
+    }
+
+    static func thumbnailURL(from input: String) -> URL? {
+        guard let videoID = videoID(from: input) else {
+            return nil
+        }
+        return URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg")
+    }
+
+    private static func videoID(from input: String) -> String? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard
             let url = URL(string: trimmed),
@@ -38,7 +52,7 @@ enum YouTubeURLParser {
         guard let videoID, isValidVideoID(videoID) else {
             return nil
         }
-        return URL(string: "https://www.youtube.com/watch?v=\(videoID)")
+        return videoID
     }
 
     private static func isValidVideoID(_ value: String) -> Bool {
